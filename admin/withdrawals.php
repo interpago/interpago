@@ -56,40 +56,38 @@ $result = $conn->query("
         .status-completed { background-color: #dcfce7; color: #166534; }
     </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-slate-100">
     <div class="flex">
         <!-- Barra lateral -->
-        <aside class="w-64 bg-indigo-800 text-white min-h-screen p-4 flex-shrink-0 flex flex-col">
+        <aside class="w-64 bg-slate-800 text-white min-h-screen p-4 flex-shrink-0 flex flex-col">
             <div class="text-center mb-10">
                 <a href="index.php" class="flex items-center justify-center space-x-2">
-                    <svg class="h-10 w-10 text-white" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor">
-                        <path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/>
-                        <path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/>
-                    </svg>
+                    <i class="fas fa-shield-alt text-3xl"></i>
                     <h1 class="text-2xl font-bold">Admin Interpago</h1>
                 </a>
             </div>
             <nav class="flex-grow">
-                <ul>
-                    <li class="mb-2"><a href="index.php" class="flex items-center p-3 rounded-lg hover:bg-indigo-700"><i class="fas fa-tachometer-alt w-6"></i><span class="ml-3">Dashboard</span></a></li>
-                    <li class="mb-2"><a href="transactions.php" class="flex items-center p-3 rounded-lg hover:bg-indigo-700"><i class="fas fa-list-ul w-6"></i><span class="ml-3">Transacciones</span></a></li>
-                    <li class="mb-2"><a href="withdrawals.php" class="flex items-center p-3 rounded-lg bg-indigo-900"><i class="fas fa-hand-holding-usd w-6"></i><span class="ml-3">Retiros</span></a></li>
-                    <li class="mb-2"><a href="verifications.php" class="flex items-center p-3 rounded-lg hover:bg-indigo-700"><i class="fas fa-user-check w-6"></i><span class="ml-3">Verificaciones</span></a></li>
+                <ul class="space-y-2">
+                    <li><a href="index.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-tachometer-alt w-6"></i><span class="ml-3">Dashboard</span></a></li>
+                    <li><a href="transactions.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-list-ul w-6"></i><span class="ml-3">Transacciones</span></a></li>
+                    <li><a href="withdrawals.php" class="flex items-center p-3 rounded-lg bg-slate-900"><i class="fas fa-hand-holding-usd w-6"></i><span class="ml-3">Retiros</span></a></li>
+                    <li><a href="verifications.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-user-check w-6"></i><span class="ml-3">Verificaciones</span></a></li>
+                    <li><a href="disputes.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-gavel w-6"></i><span class="ml-3">Disputas</span></a></li>
                 </ul>
             </nav>
-            <div><a href="logout.php" class="flex items-center p-3 rounded-lg hover:bg-indigo-700"><i class="fas fa-sign-out-alt w-6"></i><span class="ml-3">Cerrar Sesión</span></a></div>
+            <div><a href="logout.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-sign-out-alt w-6"></i><span class="ml-3">Cerrar Sesión</span></a></div>
         </aside>
 
         <!-- Contenido Principal -->
         <main class="flex-1 p-6 md:p-10 overflow-y-auto">
             <header class="mb-8">
-                <h1 class="text-3xl font-bold text-gray-900">Solicitudes de Retiro</h1>
-                <p class="text-gray-600">Gestiona y procesa los pagos a los vendedores.</p>
+                <h1 class="text-3xl font-bold text-slate-900">Solicitudes de Retiro</h1>
+                <p class="text-slate-600">Gestiona y procesa los pagos a los vendedores.</p>
             </header>
 
             <div class="bg-white rounded-2xl shadow-lg overflow-x-auto">
-                <table class="w-full text-sm text-left text-gray-500">
-                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                <table class="w-full text-sm text-left text-slate-500">
+                    <thead class="text-xs text-slate-700 uppercase bg-slate-50">
                         <tr>
                             <th class="px-6 py-3">Fecha Solicitud</th>
                             <th class="px-6 py-3">Usuario</th>
@@ -103,14 +101,14 @@ $result = $conn->query("
                         <?php if ($result && $result->num_rows > 0): ?>
                             <?php while($row = $result->fetch_assoc()): ?>
                                 <?php $bank_details = json_decode($row['bank_details'], true); ?>
-                                <tr class="bg-white border-b hover:bg-gray-50">
+                                <tr class="bg-white border-b hover:bg-slate-50">
                                     <td class="px-6 py-4"><?php echo date("d M, Y H:i", strtotime($row['created_at'])); ?></td>
                                     <td class="px-6 py-4">
-                                        <p class="font-medium text-gray-900"><?php echo htmlspecialchars($row['user_name']); ?></p>
-                                        <p class="text-xs text-gray-500"><?php echo htmlspecialchars($row['user_email']); ?></p>
+                                        <p class="font-medium text-slate-900"><?php echo htmlspecialchars($row['user_name']); ?></p>
+                                        <p class="text-xs text-slate-500"><?php echo htmlspecialchars($row['user_email']); ?></p>
                                     </td>
                                     <td class="px-6 py-4 font-bold text-green-600">$<?php echo number_format($row['amount'], 2); ?></td>
-                                    <td class="px-6 py-4 text-xs text-gray-600">
+                                    <td class="px-6 py-4 text-xs text-slate-600">
                                         <strong>Banco:</strong> <?php echo htmlspecialchars($bank_details['bank_name']); ?><br>
                                         <strong>Tipo:</strong> <?php echo htmlspecialchars($bank_details['account_type']); ?><br>
                                         <strong>N°:</strong> <?php echo htmlspecialchars($bank_details['account_number']); ?><br>
@@ -129,13 +127,13 @@ $result = $conn->query("
                                                 </button>
                                             </form>
                                         <?php else: ?>
-                                            <span class="text-gray-400 italic">Procesado el <?php echo date("d/m/y", strtotime($row['completed_at'])); ?></span>
+                                            <span class="text-slate-400 italic">Procesado el <?php echo date("d/m/y", strtotime($row['completed_at'])); ?></span>
                                         <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
-                            <tr><td colspan="6" class="text-center py-10 text-gray-500">No hay solicitudes de retiro todavía.</td></tr>
+                            <tr><td colspan="6" class="text-center py-10 text-slate-500">No hay solicitudes de retiro todavía.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
