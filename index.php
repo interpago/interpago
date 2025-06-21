@@ -24,8 +24,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         exit;
     }
 
+    // --- INICIO DE LA CORRECCIÓN ---
+    // Obtener todos los datos del usuario actual desde la sesión
     $current_user_id = $_SESSION['user_id'];
     $current_user_name = $_SESSION['user_name'];
+    $current_user_uuid = $_SESSION['user_uuid']; // UUID del creador de la transacción
+    // --- FIN DE LA CORRECCIÓN ---
+
     $role = $_POST['role'];
     $counterparty_email = trim($_POST['counterparty_email']);
 
@@ -54,7 +59,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             $message = "Error: Con esta transacción superarías tu límite de volumen mensual de " . number_format(MONTHLY_VOLUME_LIMIT, 0, ',', '.') . " COP.";
             $message_type = 'error';
         } else {
-            $user_stmt = $conn->prepare("SELECT id, name, email FROM users WHERE email = ?");
+            // --- INICIO DE LA CORRECCIÓN ---
+            // Buscar a la contraparte y obtener también su user_uuid
+            $user_stmt = $conn->prepare("SELECT id, name, email, user_uuid FROM users WHERE email = ?");
+            // --- FIN DE LA CORRECCIÓN ---
             $user_stmt->bind_param("s", $counterparty_email);
             $user_stmt->execute();
             $counterparty_result = $user_stmt->get_result();
@@ -65,14 +73,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             } else {
                 $counterparty = $counterparty_result->fetch_assoc();
 
-                $buyer_id = ($role === 'buyer') ? $current_user_id : $counterparty['id'];
-                $seller_id = ($role === 'seller') ? $current_user_id : $counterparty['id'];
-                $buyer_name = ($role === 'buyer') ? $current_user_name : $counterparty['name'];
-                $seller_name = ($role === 'seller') ? $current_user_name : $counterparty['name'];
+                // --- INICIO DE LA CORRECCIÓN ---
+                // Asignar los IDs y UUIDs correctos basados en el rol
+                if ($role === 'buyer') {
+                    $buyer_id = $current_user_id;
+                    $seller_id = $counterparty['id'];
+                    $buyer_name = $current_user_name;
+                    $seller_name = $counterparty['name'];
+                    $buyer_uuid = $current_user_uuid; // UUID del usuario actual
+                    $seller_uuid = $counterparty['user_uuid']; // UUID de la contraparte
+                } else { // role === 'seller'
+                    $buyer_id = $counterparty['id'];
+                    $seller_id = $current_user_id;
+                    $buyer_name = $counterparty['name'];
+                    $seller_name = $current_user_name;
+                    $buyer_uuid = $counterparty['user_uuid']; // UUID de la contraparte
+                    $seller_uuid = $current_user_uuid; // UUID del usuario actual
+                }
 
+                // Generar un UUID único solo para la transacción en sí
                 $transaction_uuid = generate_uuid();
-                $buyer_uuid = generate_uuid();
-                $seller_uuid = generate_uuid();
+                // --- FIN DE LA CORRECCIÓN ---
 
                 $our_fee = $amount * SERVICE_FEE_PERCENTAGE;
                 $gateway_cost = ($amount * GATEWAY_PERCENTAGE_COST) + GATEWAY_FIXED_COST;
@@ -90,23 +111,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
                 if ($stmt->execute()) {
                     $base_url_for_links = rtrim(APP_URL, '/');
-                    $buyer_link = "{$base_url_for_links}/transaction.php?tx_uuid={$transaction_uuid}&user_id={$buyer_uuid}";
-                    $seller_link = "{$base_url_for_links}/transaction.php?tx_uuid={$transaction_uuid}&user_id={$seller_uuid}";
-
-                    $notification_link_for_counterparty = ($role === 'buyer') ? $seller_link : $buyer_link;
+                    // Los enlaces ahora no necesitan el user_id, son seguros por sí mismos
+                    $transaction_link = "{$base_url_for_links}/transaction.php?tx_uuid={$transaction_uuid}";
 
                     send_notification($conn, 'new_transaction_invitation', [
                         'transaction_uuid' => $transaction_uuid,
                         'initiator_name' => $current_user_name,
                         'counterparty_email' => $counterparty['email'],
                         'counterparty_name' => $counterparty['name'],
-                        'counterparty_link' => $notification_link_for_counterparty
+                        'counterparty_link' => $transaction_link
                     ]);
 
-                    $message = "<strong>¡Transacción Creada!</strong><br>Se ha enviado una invitación por correo a la contraparte. También puedes compartir los siguientes enlaces:";
+                    $message = "<strong>¡Transacción Creada!</strong><br>Se ha enviado una invitación por correo a la contraparte. El enlace único para esta transacción es:";
                     $message .= "<div class='mt-4 text-left p-4 bg-gray-100 rounded-lg space-y-2'>";
-                    $message .= "<div><strong class='text-green-700'>Para el Comprador:</strong><br><a href='{$buyer_link}' class='text-slate-600 break-all' target='_blank'>{$buyer_link}</a></div>";
-                    $message .= "<div><strong class='text-blue-700'>Para el Vendedor:</strong><br><a href='{$seller_link}' class='text-slate-600 break-all' target='_blank'>{$seller_link}</a></div>";
+                    $message .= "<div><strong class='text-blue-700'>Enlace para ambos:</strong><br><a href='{$transaction_link}' class='text-slate-600 break-all' target='_blank'>{$transaction_link}</a></div>";
                     $message .= "</div>";
                     $message_type = 'success';
                 } else {
@@ -150,7 +168,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <div class="flex items-center space-x-4">
                         <?php if (isset($_SESSION['user_id'])): ?>
                             <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
-                            <!-- BOTÓN AÑADIDO -->
                             <a href="edit_profile.php" class="text-slate-600 font-medium hover:text-blue-600">Centro de cuenta</a>
                             <a href="logout.php" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 text-sm">Cerrar Sesión</a>
                         <?php else: ?>

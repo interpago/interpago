@@ -151,9 +151,30 @@ $status_translations = [
                                 <tbody>
                                     <?php if ($transactions && $transactions->num_rows > 0): ?>
                                         <?php while($tx = $transactions->fetch_assoc()): ?>
-                                            <tr class="border-b"><td class="px-6 py-4"><?php $role = ($tx['buyer_id'] == $user_id) ? 'Comprador' : 'Vendedor'; $role_class = ($role == 'Comprador') ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'; echo "<span class='px-2 py-1 font-semibold rounded-full $role_class text-xs'>$role</span>"; ?></td><td class="px-6 py-4 font-medium text-slate-900"><?php echo htmlspecialchars($tx['product_description']); ?></td><td class="px-6 py-4">$<?php echo number_format($tx['amount'], 2); ?></td><td class="px-6 py-4"><span class="status-pill status-<?php echo htmlspecialchars($tx['status']); ?>"><?php echo htmlspecialchars($status_translations[$tx['status']] ?? ucfirst($tx['status'])); ?></span></td><td class="px-6 py-4 text-slate-500"><?php echo date("d M, Y", strtotime($tx['created_at'])); ?></td><td class="px-6 py-4"><a href="transaction.php?tx_uuid=<?php echo $tx['transaction_uuid']; ?>&user_id=<?php echo ($role == 'Comprador' ? $tx['buyer_uuid'] : $tx['seller_uuid']); ?>" class="text-slate-600 hover:underline font-medium">Ver Detalles</a></td></tr>
+                                            <tr class="border-b">
+                                                <td class="px-6 py-4">
+                                                    <?php
+                                                        $role = ($tx['buyer_id'] == $user_id) ? 'Comprador' : 'Vendedor';
+                                                        $role_class = ($role == 'Comprador') ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800';
+                                                    ?>
+                                                    <span class='px-2 py-1 font-semibold rounded-full <?php echo $role_class; ?> text-xs'><?php echo $role; ?></span>
+                                                </td>
+                                                <td class="px-6 py-4 font-medium text-slate-900"><?php echo htmlspecialchars($tx['product_description']); ?></td>
+                                                <td class="px-6 py-4">$<?php echo number_format($tx['amount'], 2); ?></td>
+                                                <td class="px-6 py-4">
+                                                    <span class="status-pill status-<?php echo htmlspecialchars($tx['status']); ?>">
+                                                        <?php echo htmlspecialchars($status_translations[$tx['status']] ?? ucfirst($tx['status'])); ?>
+                                                    </span>
+                                                </td>
+                                                <td class="px-6 py-4 text-slate-500"><?php echo date("d M, Y", strtotime($tx['created_at'])); ?></td>
+                                                <td class="px-6 py-4">
+                                                    <a href="transaction.php?tx_uuid=<?php echo htmlspecialchars($tx['transaction_uuid']); ?>" class="text-slate-600 hover:underline font-medium">Ver Detalles</a>
+                                                </td>
+                                            </tr>
                                         <?php endwhile; ?>
-                                    <?php else: ?><tr><td colspan="6" class="text-center py-10 text-slate-500">Aún no tienes transacciones.</td></tr><?php endif; ?>
+                                    <?php else: ?>
+                                        <tr><td colspan="6" class="text-center py-10 text-slate-500">Aún no tienes transacciones.</td></tr>
+                                    <?php endif; ?>
                                 </tbody>
                             </table>
                         </div>

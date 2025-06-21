@@ -23,7 +23,7 @@ if (empty($transaction_uuid)) {
 }
 
 // Verificar que la transacción pertenece al usuario y está en un estado válido para disputa
-$stmt = $conn->prepare("SELECT * FROM transactions WHERE transaction_uuid = ? AND buyer_id = ? AND status IN ('shipped', 'received')");
+$stmt = $conn->prepare("SELECT * FROM transactions WHERE transaction_uuid = ? AND buyer_id = ? AND status IN ('funded', 'shipped', 'received')");
 $stmt->bind_param("si", $transaction_uuid, $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -60,7 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($update_stmt->execute()) {
                 send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
-                header("Location: transaction.php?tx_uuid=" . $transaction_uuid . "&user_id=" . $transaction['buyer_uuid']);
+                // --- INICIO DE CORRECCIÓN: Redirección segura ---
+                header("Location: transaction.php?tx_uuid=" . $transaction_uuid);
+                // --- FIN DE CORRECCIÓN ---
                 exit;
             } else {
                 $error = "Error al registrar la disputa en la base de datos.";
@@ -101,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <p class="text-xs text-slate-500 mt-1">Puedes subir fotos o un video corto del producto.</p>
                 </div>
                 <div class="flex justify-between items-center pt-4 border-t">
-                    <a href="transaction.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>&user_id=<?php echo $transaction['buyer_uuid']; ?>" class="text-slate-600 hover:underline">Cancelar</a>
+                    <a href="transaction.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="text-slate-600 hover:underline">Cancelar</a>
                     <button type="submit" class="bg-red-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-700"><i class="fas fa-exclamation-triangle mr-2"></i>Confirmar y Abrir Disputa</button>
                 </div>
             </form>

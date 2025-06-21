@@ -20,8 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($email) || empty($password)) {
         $error = 'Todos los campos son obligatorios.';
     } else {
-        // Buscar al usuario en la base de datos
-        $stmt = $conn->prepare("SELECT id, name, password_hash FROM users WHERE email = ?");
+        // CORRECCIÓN: Seleccionar también el user_uuid
+        $stmt = $conn->prepare("SELECT id, user_uuid, name, password_hash FROM users WHERE email = ?");
         $stmt->bind_param("s", $email);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -33,8 +33,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Regenerar el ID de la sesión para mayor seguridad
                 session_regenerate_id(true);
 
-                // Guardar los datos del usuario en la sesión
+                // CORRECCIÓN: Guardar TODOS los datos necesarios del usuario en la sesión
                 $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_uuid'] = $user['user_uuid']; // ¡Línea clave que faltaba!
                 $_SESSION['user_name'] = $user['name'];
 
                 // Registrar el inicio de sesión en el historial
