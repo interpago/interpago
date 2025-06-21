@@ -1,0 +1,8 @@
+# Archivo de configuración con datos sensibles
+config.php
+
+# Archivos de entorno
+.env
+
+# Carpeta de dependencias de Composer
+/vendor/
