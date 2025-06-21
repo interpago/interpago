@@ -1,0 +1,51 @@
+2025-06-14 05:41:01 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:41:01 - Archivo config.php encontrado.
+2025-06-14 05:41:01 - ERROR FATAL: No se encuentra el autoloader de Composer en la ruta: C:\xampp\htdocs\xampp\pago/vendor/autoload.php. Por favor, ejecuta 'composer install'.
+2025-06-14 05:41:02 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:41:02 - Archivo config.php encontrado.
+2025-06-14 05:41:02 - ERROR FATAL: No se encuentra el autoloader de Composer en la ruta: C:\xampp\htdocs\xampp\pago/vendor/autoload.php. Por favor, ejecuta 'composer install'.
+2025-06-14 05:41:02 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:41:02 - Archivo config.php encontrado.
+2025-06-14 05:41:02 - ERROR FATAL: No se encuentra el autoloader de Composer en la ruta: C:\xampp\htdocs\xampp\pago/vendor/autoload.php. Por favor, ejecuta 'composer install'.
+2025-06-14 05:42:02 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:42:02 - Archivo config.php encontrado.
+2025-06-14 05:42:02 - ERROR FATAL: No se encuentra el autoloader de Composer en la ruta: C:\xampp\htdocs\xampp\pago/vendor/autoload.php. Por favor, ejecuta 'composer install'.
+2025-06-14 05:42:02 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:42:02 - Archivo config.php encontrado.
+2025-06-14 05:42:02 - ERROR FATAL: No se encuentra el autoloader de Composer en la ruta: C:\xampp\htdocs\xampp\pago/vendor/autoload.php. Por favor, ejecuta 'composer install'.
+2025-06-14 05:43:48 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:43:48 - Archivos de configuración y librería MANUAL cargados correctamente.
+2025-06-14 05:43:48 - SDK de Mercado Pago configurado.
+2025-06-14 05:43:48 - Datos recibidos: {"resource":"https:\/\/api.mercadolibre.com\/merchant_orders\/31707331225","topic":"merchant_order"}
+2025-06-14 05:43:48 - Aviso: La notificación no es de tipo 'payment'.
+2025-06-14 05:43:48 - --- FIN DE PETICIÓN WEBHOOK ---
+2025-06-14 05:43:49 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 05:43:49 - Archivos de configuración y librería MANUAL cargados correctamente.
+2025-06-14 05:43:49 - SDK de Mercado Pago configurado.
+2025-06-14 05:43:49 - Datos recibidos: {"action":"payment.created","api_version":"v1","data":{"id":"1337626153"},"date_created":"2025-06-14T03:43:48Z","id":122161287430,"live_mode":false,"type":"payment","user_id":"374687785"}
+2025-06-14 05:43:49 - ID de Pago recibido: 1337626153
+2025-06-14 05:43:49 - Pago encontrado y APROBADO. Referencia externa: 91a50937-2e8b-4b19-a760-fb35ebe0ddd2
+2025-06-14 05:43:49 - ¡ÉXITO! Base de datos actualizada a 'En Custodia'.
+2025-06-14 05:43:49 - --- FIN DE PETICIÓN WEBHOOK ---
+2025-06-14 06:00:23 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 06:00:23 - Archivos de configuración y librería MANUAL cargados correctamente.
+2025-06-14 06:00:23 - SDK de Mercado Pago configurado.
+2025-06-14 06:00:23 - Datos recibidos: {"resource":"https:\/\/api.mercadolibre.com\/merchant_orders\/31707301035","topic":"merchant_order"}
+2025-06-14 06:00:23 - Aviso: La notificación no es de tipo 'payment'.
+2025-06-14 06:00:23 - --- FIN DE PETICIÓN WEBHOOK ---
+2025-06-14 06:00:23 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 06:00:23 - Archivos de configuración y librería MANUAL cargados correctamente.
+2025-06-14 06:00:23 - SDK de Mercado Pago configurado.
+2025-06-14 06:00:23 - Datos recibidos: {"action":"payment.created","api_version":"v1","data":{"id":"1337626141"},"date_created":"2025-06-14T03:41:02Z","id":122161519764,"live_mode":false,"type":"payment","user_id":"374687785"}
+2025-06-14 06:00:23 - ID de Pago recibido: 1337626141
+2025-06-14 06:00:24 - Pago encontrado y APROBADO. Referencia externa: 91a50937-2e8b-4b19-a760-fb35ebe0ddd2
+2025-06-14 06:00:24 - AVISO: La consulta no afectó ninguna fila (posiblemente ya estaba actualizada).
+2025-06-14 06:00:24 - --- FIN DE PETICIÓN WEBHOOK ---
+2025-06-14 21:22:40 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-14 21:22:40 - Archivos cargados.
+2025-06-14 21:22:40 - SDK de Mercado Pago configurado.
+2025-06-14 21:22:40 - Datos recibidos: {"resource":"https:\/\/api.mercadolibre.com\/merchant_orders\/31742483898","topic":"merchant_order"}
+2025-06-14 21:22:40 - Aviso: La notificación no es de tipo 'payment'.
+2025-06-14 21:22:40 - --- FIN DE PETICIÓN WEBHOOK ---
+2025-06-15 21:29:56 - --- INICIO DE PETICIÓN WEBHOOK ---
+2025-06-15 21:29:56 - Archivos cargados.

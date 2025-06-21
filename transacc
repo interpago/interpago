@@ -1,0 +1,111 @@
+<?php
+// transaction.php
+
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/send_notification.php';
+session_start();
+
+$transaction = null;
+$messages = [];
+$user_role = 'Observador';
+$error_message = '';
+$is_finished = true;
+$current_status = '';
+
+// **NUEVAS VARIABLES PARA EL FORMULARIO DE WOMPI**
+$wompi_signature = '';
+$amount_in_cents = 0;
+$redirect_url_wompi = '';
+$buyer_uuid = '';
+
+$user_uuid_get = $_GET['user_id'] ?? '';
+$transaction_uuid = $_GET['tx_uuid'] ?? ($_GET['id'] ?? '');
+
+if (!empty($transaction_uuid)) {
+    $stmt = $conn->prepare("SELECT * FROM transactions WHERE transaction_uuid = ?");
+    $stmt->bind_param("s", $transaction_uuid);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($transaction = $result->fetch_assoc()) {
+        if ($user_uuid_get === $transaction['buyer_uuid']) $user_role = 'Comprador';
+        elseif ($user_uuid_get === $transaction['seller_uuid']) $user_role = 'Vendedor';
+
+        $current_status = $transaction['status'];
+        $is_finished = in_array($current_status, ['released', 'cancelled', 'dispute']);
+
+        // Calcular los datos para Wompi solo si es necesario
+        if ($user_role === 'Comprador' && $current_status === 'initiated') {
+            $buyer_uuid = $transaction['buyer_uuid'];
+            $amount_to_charge = $transaction['amount'];
+            if($transaction['commission_payer'] === 'buyer'){ $amount_to_charge += $transaction['commission']; }
+            elseif($transaction['commission_payer'] === 'split'){ $amount_to_charge += ($transaction['commission'] / 2); }
+
+            $amount_in_cents = round($amount_to_charge * 100);
+            $redirect_url_wompi = rtrim(APP_URL, '/') . '/payment_response.php';
+
+            // **Lógica para generar la firma de integridad según la documentación de Wompi**
+            $concatenation = $transaction_uuid . $amount_in_cents . 'COP' . WOMPI_INTEGRITY_SECRET;
+            $wompi_signature = hash('sha256', $concatenation);
+        }
+
+    } else { $error_message = "Transacción no encontrada."; }
+} else { $error_message = "ID de transacción no proporcionado."; }
+
+// ... (resto de la lógica PHP y funciones auxiliares)
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detalle de la Transacción - Interpago</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+    <style> body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; } /* ... */ </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- ... (Header y HTML principal) ... -->
+        <?php if ($transaction): ?>
+            <div class="grid lg:grid-cols-12 gap-8">
+                <!-- ... (Columnas de Chat y Detalles) ... -->
+                <div class="lg:col-span-3">
+                    <div class="card p-6 md:p-8 sticky top-8">
+                        <h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2>
+                        <div class="text-center">
+                            <p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo $user_role; ?></span></p>
+                            <?php if (!$is_finished): ?>
+                                <?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?>
+                                    <div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b">
+                                        <h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3>
+                                        <p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura para continuar.</p>
+
+                                        <!-- **FORMULARIO HTML DIRECTO A WOMPI** -->
+                                        <form action="https://checkout.wompi.co/p/" method="GET">
+                                          <input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>" />
+                                          <input type="hidden" name="currency" value="COP" />
+                                          <input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>" />
+                                          <input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>" />
+                                          <input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>" />
+                                          <input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>" />
+
+                                          <button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors">
+                                            <i class="fas fa-wallet mr-2"></i>Pagar con Wompi
+                                          </button>
+                                        </form>
+                                    </div>
+                                <?php endif; ?>
+                                <!-- ... (Resto de paneles de acción para vendedor, etc.) ... -->
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+    </div>
+</body>
