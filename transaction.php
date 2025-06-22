@@ -21,6 +21,9 @@ $transaction = null; $messages = []; $user_role = 'Observador'; $error_message =
 $is_finished = true; $current_status = ''; $wompi_signature = ''; $amount_in_cents = 0;
 $redirect_url_wompi = '';
 $last_message_id = 0;
+$buyer_balance = 0;
+$amount_to_charge_gateway = 0; $amount_to_charge_wallet = 0;
+$buyer_commission_paid = 0; $seller_commission_paid = 0;
 
 // Obtener el ID de la transacción desde la URL.
 $transaction_uuid = $_GET['tx_uuid'] ?? ($_GET['id'] ?? '');
@@ -32,7 +35,6 @@ if (!empty($transaction_uuid)) {
     $result = $stmt->get_result();
 
     if ($transaction = $result->fetch_assoc()) {
-        // El rol del usuario se determina de forma segura basado en la SESIÓN.
         $logged_in_user_uuid = $_SESSION['user_uuid'] ?? '';
 
         if (!empty($logged_in_user_uuid)) {
@@ -44,6 +46,15 @@ if (!empty($transaction_uuid)) {
         }
 
         $current_status = $transaction['status'];
+
+        if ($user_role === 'Comprador') {
+            $balance_stmt = $conn->prepare("SELECT balance FROM users WHERE id = ?");
+            $balance_stmt->bind_param("i", $transaction['buyer_id']);
+            $balance_stmt->execute();
+            $balance_result = $balance_stmt->get_result()->fetch_assoc();
+            $buyer_balance = $balance_result['balance'] ?? 0;
+            $balance_stmt->close();
+        }
 
         if ($current_status === 'received') {
             $check_stmt = $conn->prepare("SELECT id FROM transactions WHERE id = ? AND release_funds_at IS NOT NULL AND NOW() >= release_funds_at");
@@ -76,18 +87,38 @@ if (!empty($transaction_uuid)) {
 
         $is_finished = in_array($current_status, ['released', 'cancelled']);
 
-        if ($user_role === 'Comprador' && $current_status === 'initiated') {
-            $amount_to_charge = $transaction['amount'];
-            if($transaction['commission_payer'] === 'buyer'){ $amount_to_charge += $transaction['commission']; }
-            elseif($transaction['commission_payer'] === 'split'){ $amount_to_charge += ($transaction['commission'] / 2); }
+        $amount_to_charge_gateway = $transaction['amount'];
+        if($transaction['commission_payer'] === 'buyer'){ $amount_to_charge_gateway += $transaction['commission']; }
+        elseif($transaction['commission_payer'] === 'split'){ $amount_to_charge_gateway += ($transaction['commission'] / 2); }
 
-            $amount_in_cents = round($amount_to_charge * 100);
+        $platform_commission = $transaction['amount'] * SERVICE_FEE_PERCENTAGE;
+        $amount_to_charge_wallet = $transaction['amount'];
+        if ($transaction['commission_payer'] === 'buyer') {
+            $amount_to_charge_wallet += $platform_commission;
+        } elseif ($transaction['commission_payer'] === 'split') {
+            $amount_to_charge_wallet += ($platform_commission / 2);
+        }
+
+        if ($user_role === 'Comprador' && $current_status === 'initiated') {
+            $amount_in_cents = round($amount_to_charge_gateway * 100);
             $redirect_url_wompi = rtrim(APP_URL, '/') . '/payment_response.php';
             if (defined('WOMPI_INTEGRITY_SECRET')) {
                 $concatenation = $transaction_uuid . $amount_in_cents . 'COP' . WOMPI_INTEGRITY_SECRET;
                 $wompi_signature = hash('sha256', $concatenation);
             }
         }
+
+        // --- INICIO: Lógica de cálculo de desglose de comisión ---
+        if ($transaction['commission_payer'] === 'buyer') {
+            $buyer_commission_paid = $transaction['commission'];
+        } elseif ($transaction['commission_payer'] === 'seller') {
+            $seller_commission_paid = $transaction['commission'];
+        } elseif ($transaction['commission_payer'] === 'split') {
+            $buyer_commission_paid = $transaction['commission'] / 2;
+            $seller_commission_paid = $transaction['commission'] / 2;
+        }
+        // --- FIN: Lógica de cálculo ---
+
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -116,25 +147,56 @@ if (!empty($transaction_uuid)) {
                 }
             }
 
-            // --- INICIO: LÓGICA DE RESOLUCIÓN DE DISPUTAS ---
-            // Acción: Vendedor reembolsa para cerrar disputa
+            if (isset($_POST['pay_with_wallet']) && $user_role === 'Comprador' && $current_status === 'initiated') {
+                if ($buyer_balance >= $amount_to_charge_wallet) {
+                    $conn->begin_transaction();
+                    try {
+                        $new_commission = $transaction['amount'] * SERVICE_FEE_PERCENTAGE;
+                        $new_net_amount = $transaction['amount'];
+                        if ($transaction['commission_payer'] === 'seller') {
+                             $new_net_amount -= $new_commission;
+                        } elseif ($transaction['commission_payer'] === 'split') {
+                            $new_net_amount -= ($new_commission / 2);
+                        }
+
+                        $new_balance = $buyer_balance - $amount_to_charge_wallet;
+                        $update_balance_stmt = $conn->prepare("UPDATE users SET balance = ? WHERE id = ?");
+                        $update_balance_stmt->bind_param("di", $new_balance, $transaction['buyer_id']);
+                        $update_balance_stmt->execute();
+
+                        $update_tx_stmt = $conn->prepare("UPDATE transactions SET status = 'funded', commission = ?, net_amount = ? WHERE id = ?");
+                        $update_tx_stmt->bind_param("ddi", $new_commission, $new_net_amount, $transaction['id']);
+                        $update_tx_stmt->execute();
+
+                        $conn->commit();
+                        send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => 'funded']);
+                        header("Location: " . $_SERVER['REQUEST_URI']);
+                        exit;
+
+                    } catch (Exception $e) {
+                        $conn->rollback();
+                        error_log("Wallet Payment Error: " . $e->getMessage());
+                        $error_message = "Error al procesar el pago desde la billetera.";
+                    }
+                } else {
+                    $error_message = "Saldo insuficiente para realizar esta operación.";
+                }
+            }
+
             if(isset($_POST['seller_refund']) && $user_role === 'Vendedor' && $current_status === 'dispute') {
                 $conn->begin_transaction();
                 try {
-                    // 1. Calcular el monto total que pagó el comprador
-                    $amount_to_refund = $transaction['amount'];
+                    $amount_paid_by_buyer = $transaction['amount'];
                     if ($transaction['commission_payer'] === 'buyer') {
-                        $amount_to_refund += $transaction['commission'];
+                        $amount_paid_by_buyer += $transaction['commission'];
                     } elseif ($transaction['commission_payer'] === 'split') {
-                        $amount_to_refund += ($transaction['commission'] / 2);
+                        $amount_paid_by_buyer += ($transaction['commission'] / 2);
                     }
 
-                    // 2. Devolver el dinero a la billetera del comprador
                     $refund_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
-                    $refund_stmt->bind_param("di", $amount_to_refund, $transaction['buyer_id']);
+                    $refund_stmt->bind_param("di", $amount_paid_by_buyer, $transaction['buyer_id']);
                     $refund_stmt->execute();
 
-                    // 3. Marcar la transacción como cancelada
                     $status_stmt = $conn->prepare("UPDATE transactions SET status = 'cancelled', completed_at = NOW() WHERE id = ?");
                     $status_stmt->bind_param("i", $transaction['id']);
                     $status_stmt->execute();
@@ -148,7 +210,6 @@ if (!empty($transaction_uuid)) {
                     $error_message = "Error al procesar el reembolso.";
                 }
             }
-            // --- FIN: LÓGICA DE RESOLUCIÓN DE DISPUTAS ---
 
             if (isset($_POST['new_status'])) {
                 $new_status = $_POST['new_status'];
@@ -159,18 +220,16 @@ if (!empty($transaction_uuid)) {
                     'Comprador' => [
                         'shipped' => 'received',
                         'received' => 'released',
-                        'dispute' => ['released', 'received']
+                        'dispute' => 'released'
                     ]
                 ];
 
-                // Lógica de transición de estado
-                if (isset($transitions[$user_role][$current_status])) {
-                    $allowed_transitions = $transitions[$user_role][$current_status];
-                    if (is_array($allowed_transitions) && in_array($new_status, $allowed_transitions)) {
-                        $allowed = true;
-                    } elseif (is_string($allowed_transitions) && $allowed_transitions === $new_status) {
-                        $allowed = true;
-                    }
+                if (isset($_POST['cancel_dispute']) && $user_role === 'Comprador' && $current_status === 'dispute') {
+                    $new_status = 'received';
+                    $allowed = true;
+                }
+                elseif (isset($transitions[$user_role][$current_status]) && $new_status === $transitions[$user_role][$current_status]) {
+                    $allowed = true;
                 }
 
                 if ($allowed) {
@@ -281,7 +340,16 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                 </div>
                 <div class="grid lg:grid-cols-12 gap-8">
                     <div class="lg:col-span-4 card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Chat de la Transacción</h2><div id="chat-box" class="h-[32rem] overflow-y-auto space-y-6 pr-4" data-last-message-id="<?php echo $last_message_id; ?>"><?php if (empty($messages)): ?><div id="no-messages" class="text-center py-10 text-slate-400"><i class="fas fa-comments text-4xl mb-3"></i><p>Aún no hay mensajes.</p></div><?php else: foreach ($messages as $msg): ?><div class="flex <?php echo ($msg['sender_role'] === $user_role) ? 'justify-end' : 'justify-start'; ?>"><div class="p-4 max-w-md <?php echo ($msg['sender_role'] === $user_role) ? 'chat-bubble-me' : 'chat-bubble-other'; ?>"><?php if (!empty($msg['image_path'])): ?><a href="<?php echo htmlspecialchars($msg['image_path']); ?>" target="_blank" class="block mb-2"><img src="<?php echo htmlspecialchars($msg['image_path']); ?>" alt="Imagen adjunta" class="rounded-lg max-h-48 w-full object-cover"></a><?php endif; ?><?php if (!empty($msg['message'])): ?><p class="text-md <?php echo ($msg['sender_role'] === $user_role) ? 'text-white' : 'text-slate-800'; ?>"><?php echo nl2br(htmlspecialchars($msg['message'])); ?></p><?php endif; ?><p class="text-xs <?php echo ($msg['sender_role'] === $user_role) ? 'text-slate-400' : 'text-slate-500'; ?> mt-2 text-right"><?php echo htmlspecialchars($msg['sender_role']); ?> - <?php echo htmlspecialchars(date("d/m H:i", strtotime($msg['created_at']))); ?></p></div></div><?php endforeach; endif; ?></div><?php if (in_array($user_role, ['Comprador', 'Vendedor']) && !in_array($current_status, ['released', 'cancelled'])): ?><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" enctype="multipart/form-data" class="pt-6 border-t mt-4"><div class="flex items-start space-x-3"><div class="relative flex-grow"><textarea id="message-input" name="message_content" placeholder="Escribe tu mensaje..." class="w-full p-3 pr-12 border border-slate-300 rounded-xl resize-none overflow-hidden" rows="1"></textarea><label for="image-upload" class="absolute right-3 top-3 cursor-pointer p-1 text-slate-500 hover:text-slate-800"><i class="fas fa-paperclip"></i><input id="image-upload" name="product_image" type="file" class="hidden" accept="image/*"></label></div><button type="submit" name="send_message" class="bg-slate-800 text-white font-bold h-12 w-12 rounded-full flex items-center justify-center hover:bg-slate-900 transition-colors"><i class="fas fa-paper-plane"></i></button></div></form><?php endif; ?></div>
-                    <div class="lg:col-span-5 space-y-8"><div class="card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Detalles del Acuerdo</h2><div class="space-y-4"><div class="flex justify-between items-baseline"><span class="text-slate-500">Producto/Servicio:</span><span class="font-semibold text-right text-slate-900"><?php echo htmlspecialchars($transaction['product_description']); ?></span></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Comprador:</span><a href="profile.php?id=<?php echo $transaction['buyer_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['buyer_name']); ?></a></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Vendedor:</span><a href="profile.php?id=<?php echo $transaction['seller_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['seller_name']); ?></a></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Monto del Acuerdo:</span><span class="font-semibold text-right text-slate-900">$<?php echo htmlspecialchars(number_format($transaction['amount'], 2)); ?> COP</span></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Comisión:</span><span class="font-semibold text-right text-red-600">- $<?php echo htmlspecialchars(number_format($transaction['commission'], 2)); ?> COP</span></div><hr class="border-dashed"><div class="flex justify-between items-baseline"><span class="font-bold text-lg text-slate-800">El Vendedor Recibirá:</span><span class="font-bold text-lg text-right text-green-600">$<?php echo htmlspecialchars(number_format($transaction['net_amount'], 2)); ?> COP</span></div></div></div>
+                    <div class="lg:col-span-5 space-y-8"><div class="card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Detalles del Acuerdo</h2><div class="space-y-4">
+                        <div class="flex justify-between items-baseline"><span class="text-slate-500">Producto/Servicio:</span><span class="font-semibold text-right text-slate-900"><?php echo htmlspecialchars($transaction['product_description']); ?></span></div><hr>
+                        <div class="flex justify-between items-baseline"><span class="text-slate-500">Comprador:</span><a href="profile.php?id=<?php echo $transaction['buyer_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['buyer_name']); ?></a></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Vendedor:</span><a href="profile.php?id=<?php echo $transaction['seller_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['seller_name']); ?></a></div><hr>
+                        <div class="flex justify-between items-baseline"><span class="text-slate-500">Monto del Acuerdo:</span><span class="font-semibold text-right text-slate-900">$<?php echo htmlspecialchars(number_format($transaction['amount'], 2)); ?> COP</span></div>
+                        <div class="flex justify-between items-baseline text-xs"><span class="text-slate-500">Comisión pagada por Comprador:</span><span class="font-semibold text-right text-red-600">- $<?php echo htmlspecialchars(number_format($buyer_commission_paid, 2)); ?> COP</span></div>
+                        <div class="flex justify-between items-baseline text-xs"><span class="text-slate-500">Comisión pagada por Vendedor:</span><span class="font-semibold text-right text-red-600">- $<?php echo htmlspecialchars(number_format($seller_commission_paid, 2)); ?> COP</span></div>
+                        <div class="flex justify-between items-baseline pt-1"><span class="text-slate-500 font-bold">Comisión Total:</span><span class="font-bold text-right text-red-700">- $<?php echo htmlspecialchars(number_format($transaction['commission'], 2)); ?> COP</span></div>
+                        <hr class="border-dashed">
+                        <div class="flex justify-between items-baseline"><span class="font-bold text-lg text-slate-800">El Vendedor Recibirá:</span><span class="font-bold text-lg text-right text-green-600">$<?php echo htmlspecialchars(number_format($transaction['net_amount'], 2)); ?> COP</span></div>
+                    </div></div>
                     <?php if ($current_status === 'released'): ?>
                         <div class="card p-6 md:p-8">
                             <h2 class="text-2xl font-bold text-slate-800 mb-6">Calificaciones</h2>
@@ -295,7 +363,16 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                     </div>
                     <div class="lg:col-span-3"><div class="card p-6 md:p-8 sticky top-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2><div class="text-center"><p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo htmlspecialchars($user_role); ?></span></p>
                     <?php if (!$is_finished): ?>
-                        <?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?><div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b"><h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura.</p><form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors"><i class="fas fa-wallet mr-2"></i>Pagar con Wompi</button></form></div>
+                        <?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?>
+                            <div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b space-y-4">
+                                <h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600">Deposita los fondos de forma segura.</p><div class="text-xs text-left p-3 bg-blue-50 rounded-lg">Tu Saldo Disponible: <span class="font-bold text-blue-800">$<?php echo number_format($buyer_balance, 2); ?> COP</span></div>
+                                <?php if ($buyer_balance >= $amount_to_charge_wallet): ?>
+                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" onsubmit="return confirm('Se descontará $<?php echo number_format($amount_to_charge_wallet, 2); ?> de tu billetera. ¿Estás seguro?');"><input type="hidden" name="pay_with_wallet" value="1"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition-colors mb-2"><i class="fas fa-wallet mr-2"></i>Pagar con Billetera ($<?php echo number_format($amount_to_charge_wallet, 2); ?>)</button></form><p class="text-xs text-slate-500 my-2">O usa otro método de pago:</p>
+                                <?php else: ?>
+                                     <p class="text-xs text-red-600 my-2">No tienes saldo suficiente para pagar desde tu billetera.</p>
+                                <?php endif; ?>
+                                <form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors">Pagar con Wompi ($<?php echo number_format($amount_to_charge_gateway, 2); ?>)</button></form>
+                            </div>
                         <?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div>
                         <?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
                         <?php elseif ($current_status === 'received'): ?>
@@ -305,17 +382,18 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                                 <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
                                 <?php if ($user_role === 'Comprador'): ?>
                                     <p class="text-sm text-slate-600 mt-2 mb-4">Puedes resolver la disputa si llegas a un acuerdo con el vendedor.</p>
-                                     <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4">
+                                     <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4" onsubmit="return confirm('¿Estás seguro? Al liberar los fondos, la transacción se completará y el dinero se enviará al vendedor.');">
                                         <input type="hidden" name="new_status" value="released">
                                         <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Acuerdo alcanzado, Liberar Fondos</button>
                                     </form>
-                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-2">
+                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-2" onsubmit="return confirm('¿Seguro que quieres cancelar la disputa? La transacción volverá al período de garantía.');">
                                         <input type="hidden" name="new_status" value="received">
-                                        <button type="submit" class="w-full bg-yellow-500 text-yellow-800 font-bold py-2 px-4 rounded-lg text-sm hover:bg-yellow-600"><i class="fas fa-undo mr-2"></i>Cancelar Disputa y Reanudar Garantía</button>
+                                        <input type="hidden" name="cancel_dispute" value="1">
+                                        <button type="submit" class="w-full bg-yellow-500 text-yellow-800 font-bold py-2 px-4 rounded-lg text-sm hover:bg-yellow-600"><i class="fas fa-undo mr-2"></i>Cancelar Disputa y Reanudar</button>
                                     </form>
                                 <?php elseif ($user_role === 'Vendedor'): ?>
-                                    <p class="text-sm text-slate-600 mt-2 mb-4">El comprador ha iniciado una disputa. Puedes resolverla a través del chat o reembolsar el pago para cancelar la transacción.</p>
-                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" onsubmit="return confirm('¿Estás seguro de que quieres reembolsar el monto al comprador? Esta acción cancelará la transacción.');">
+                                    <p class="text-sm text-slate-600 mt-2 mb-4">El comprador ha iniciado una disputa. Puedes resolverla a través del chat o reembolsar el pago.</p>
+                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" onsubmit="return confirm('¿Seguro que quieres reembolsar al comprador? Esto cancelará la transacción.');">
                                         <input type="hidden" name="seller_refund" value="1">
                                         <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-blue-700">
                                             <i class="fas fa-undo-alt mr-2"></i>Reembolsar al Comprador
