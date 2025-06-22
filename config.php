@@ -23,7 +23,7 @@ define('DB_NAME', 'escrow_db');
 define('APP_URL', 'https://e7aa-2800-e2-4a80-587-99c9-8bf-d2c3-1ab6.ngrok-free.app/pago');
 
 // **Periodo de Garantía en Minutos**
-define('INSPECTION_PERIOD_MINUTES', 60); // 1 hora de garantía para el comprador
+define('INSPECTION_PERIOD_MINUTES', 10); // 1 hora de garantía para el comprador
 
 // -- Modelo de Comisión Avanzado --
 define('SERVICE_FEE_PERCENTAGE', 0.02); // Tu 2.0% de ganancia

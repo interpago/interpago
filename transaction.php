@@ -20,6 +20,7 @@ use chillerlan\QRCode\{QRCode, QROptions};
 $transaction = null; $messages = []; $user_role = 'Observador'; $error_message = '';
 $is_finished = true; $current_status = ''; $wompi_signature = ''; $amount_in_cents = 0;
 $redirect_url_wompi = '';
+$last_message_id = 0;
 
 // Obtener el ID de la transacción desde la URL.
 $transaction_uuid = $_GET['tx_uuid'] ?? ($_GET['id'] ?? '');
@@ -44,7 +45,6 @@ if (!empty($transaction_uuid)) {
 
         $current_status = $transaction['status'];
 
-        // Lógica para auto-liberar fondos si el tiempo de garantía ha expirado
         if ($current_status === 'received') {
             $check_stmt = $conn->prepare("SELECT id FROM transactions WHERE id = ? AND release_funds_at IS NOT NULL AND NOW() >= release_funds_at");
             $check_stmt->bind_param("i", $transaction['id']);
@@ -59,11 +59,9 @@ if (!empty($transaction_uuid)) {
                     $status_stmt = $conn->prepare("UPDATE transactions SET status = ?, completed_at = NOW() WHERE id = ?");
                     $status_stmt->bind_param("si", $new_status, $transaction['id']);
                     $status_stmt->execute();
-
                     $balance_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
                     $balance_stmt->bind_param("di", $transaction['net_amount'], $transaction['seller_id']);
                     $balance_stmt->execute();
-
                     $conn->commit();
                     send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
                     header("Location: " . $_SERVER['REQUEST_URI']);
@@ -92,15 +90,13 @@ if (!empty($transaction_uuid)) {
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
             if (isset($_POST['generate_qr']) && $user_role === 'Vendedor' && $current_status === 'funded') {
                 $qr_token = "INTERPAGO_TX_" . $transaction['id'] . "_" . bin2hex(random_bytes(16));
                 $update_stmt = $conn->prepare("UPDATE transactions SET qr_code_token = ? WHERE id = ?");
                 $update_stmt->bind_param("si", $qr_token, $transaction['id']);
                 if ($update_stmt->execute()) { header("Location: " . $_SERVER['REQUEST_URI']); exit; }
             }
-
-            if (isset($_POST['send_message']) && in_array($user_role, ['Comprador', 'Vendedor'])) {
+            if (isset($_POST['send_message']) && in_array($user_role, ['Comprador', 'Vendedor']) && !in_array($current_status, ['released', 'cancelled'])) {
                 $message_content = trim($_POST['message_content']);
                 $image_path = null;
                 if (isset($_FILES['product_image']) && $_FILES['product_image']['error'] === UPLOAD_ERR_OK) {
@@ -117,20 +113,11 @@ if (!empty($transaction_uuid)) {
                     header("Location: " . $_SERVER['REQUEST_URI']); exit;
                 }
             }
-
-            if (isset($_POST['new_status'])) {
+             if (isset($_POST['new_status'])) {
                 $new_status = $_POST['new_status'];
                 $allowed = false;
-
-                $transitions = [
-                    'Vendedor' => ['funded' => 'shipped'],
-                    'Comprador' => ['shipped' => 'received', 'received' => 'released']
-                ];
-
-                if (isset($transitions[$user_role][$current_status]) && $transitions[$user_role][$current_status] === $new_status) {
-                    $allowed = true;
-                }
-
+                $transitions = ['Vendedor' => ['funded' => 'shipped'], 'Comprador' => ['shipped' => 'received', 'received' => 'released']];
+                if (isset($transitions[$user_role][$current_status]) && $transitions[$user_role][$current_status] === $new_status) { $allowed = true; }
                 if ($allowed) {
                     $conn->begin_transaction();
                     try {
@@ -140,40 +127,30 @@ if (!empty($transaction_uuid)) {
                             $update_stmt->bind_param("is", $inspection_period, $transaction_uuid);
                             $update_stmt->execute();
                         } else {
-                            $sql_update = "UPDATE transactions SET status = ?";
-                            $params_update = [$new_status];
-                            $types_update = "s";
-
+                            $sql_update = "UPDATE transactions SET status = ?"; $params_update = [$new_status]; $types_update = "s";
                             if ($new_status === 'released') {
                                 $sql_update .= ", completed_at = NOW()";
                                 $balance_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
                                 $balance_stmt->bind_param("di", $transaction['net_amount'], $transaction['seller_id']);
                                 $balance_stmt->execute();
                             }
-
-                            $sql_update .= " WHERE transaction_uuid = ?";
-                            $params_update[] = $transaction_uuid;
-                            $types_update .= "s";
-
+                            $sql_update .= " WHERE transaction_uuid = ?"; $params_update[] = $transaction_uuid; $types_update .= "s";
                             $update_stmt = $conn->prepare($sql_update);
                             $update_stmt->bind_param($types_update, ...$params_update);
                             $update_stmt->execute();
                         }
-
                         $conn->commit();
                         send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
                         header("Location: " . $_SERVER['REQUEST_URI']);
                         exit;
-
                     } catch (Exception $e) {
                         $conn->rollback();
-                        error_log("Error al actualizar estado de la transacción: " . $e->getMessage());
+                        error_log("Error al actualizar estado: " . $e->getMessage());
                         $error_message = "Hubo un error al procesar tu solicitud.";
                     }
                 }
             }
-
-            if (isset($_POST['submit_rating']) && $current_status === 'released') {
+             if (isset($_POST['submit_rating']) && $current_status === 'released') {
                 $rating = filter_var($_POST['rating'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 5]]);
                 $comment = trim($_POST['comment']);
                 if ($rating) {
@@ -191,17 +168,17 @@ if (!empty($transaction_uuid)) {
                 }
             }
         }
-
         $msg_stmt = $conn->prepare("SELECT * FROM messages WHERE transaction_id = ? ORDER BY created_at ASC");
         $msg_stmt->bind_param("i", $transaction['id']);
         $msg_stmt->execute();
         $messages = $msg_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
+        if(!empty($messages)) {
+            $last_message_id = end($messages)['id'];
+        }
     } else {
         $error_message = "No se encontró ninguna transacción con el ID: " . htmlspecialchars($transaction_uuid);
     }
 }
-
 function get_status_class($s, $c) { if(in_array($c,['cancelled', 'dispute'])) return 'timeline-step-special'; $st=['initiated','funded','shipped','received','released']; $ci=array_search($c,$st); $si=array_search($s,$st); if($c==='released'||$si<$ci) return 'timeline-step-complete'; if($si===$ci) return 'timeline-step-active'; return 'timeline-step-incomplete'; }
 function get_line_class($s, $c) { $st=['initiated','funded','shipped','received']; $ci=array_search($c,$st); $si=array_search($s,$st); if($si<$ci&&!in_array($c,['cancelled', 'dispute'])) return 'timeline-line-complete'; return 'timeline-line'; }
 ?>
@@ -215,198 +192,143 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; } .timeline-step { transition: all 0.3s ease; } .timeline-step-active { background-color: #1e293b; color: white; box-shadow: 0 0 15px rgba(30, 41, 59, 0.5); } .timeline-step-complete { background-color: #16a34a; color: white; } .timeline-step-incomplete { background-color: #e2e8f0; color: #475569; } .timeline-step-special { background-color: #ef4444; color: white; } .timeline-line { background-color: #e2e8f0; height: 4px; flex: 1; } .timeline-line-complete { background-color: #16a34a; } .chat-bubble-me { background-color: #1e293b; border-radius: 20px 20px 5px 20px; } .chat-bubble-other { background-color: #e2e8f0; border-radius: 20px 20px 20px 5px; } .card { background-color: white; border-radius: 1.5rem; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.1); } .rating { display: inline-block; } .rating input { display: none; } .rating label { float: right; cursor: pointer; color: #d1d5db; transition: color 0.2s; font-size: 2rem; } .rating label:before { content: '\f005'; font-family: 'Font Awesome 5 Free'; font-weight: 900; } .rating input:checked ~ label, .rating label:hover, .rating label:hover ~ label { color: #f59e0b; }
-    </style>
+    <style> body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; } .timeline-step { transition: all 0.3s ease; } .timeline-step-active { background-color: #1e293b; color: white; box-shadow: 0 0 15px rgba(30, 41, 59, 0.5); } .timeline-step-complete { background-color: #16a34a; color: white; } .timeline-step-incomplete { background-color: #e2e8f0; color: #475569; } .timeline-step-special { background-color: #ef4444; color: white; } .timeline-line { background-color: #e2e8f0; height: 4px; flex: 1; } .timeline-line-complete { background-color: #16a34a; } .chat-bubble-me { background-color: #1e293b; border-radius: 20px 20px 5px 20px; } .chat-bubble-other { background-color: #e2e8f0; border-radius: 20px 20px 20px 5px; } .card { background-color: white; border-radius: 1.5rem; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.1); } .rating { display: inline-block; } .rating input { display: none; } .rating label { float: right; cursor: pointer; color: #d1d5db; transition: color 0.2s; font-size: 2rem; } .rating label:before { content: '\f005'; font-family: 'Font Awesome 5 Free'; font-weight: 900; } .rating input:checked ~ label, .rating label:hover, .rating label:hover ~ label { color: #f59e0b; } </style>
 </head>
 <body class="p-4 md:p-8">
     <div class="max-w-7xl mx-auto">
-        <header class="text-center mb-12"><a href="dashboard.php" class="text-slate-600 hover:text-slate-900 mb-4 inline-block"><i class="fas fa-arrow-left mr-2"></i>Volver al Panel</a><h1 class="text-4xl md:text-5xl font-extrabold text-slate-900">Detalle de la Transacción</h1><?php if ($transaction): ?><p class="text-slate-500 mt-2">ID: <span class="font-mono bg-slate-200 text-slate-700 px-2 py-1 rounded-md text-sm"><?php echo htmlspecialchars($transaction['transaction_uuid']); ?></span></p><?php endif; ?></header>
-        <?php if (!empty($error_message)): ?><div class="card p-6 mb-8 text-center bg-red-50 text-red-700"><i class="fas fa-exclamation-triangle text-3xl mb-3"></i><p class="font-semibold"><?php echo $error_message; ?></p></div><?php endif; ?>
+        <header class="text-center mb-12"><a href="dashboard.php" class="text-slate-600 hover:text-slate-900 mb-4 inline-block"><i class="fas fa-arrow-left mr-2"></i>Volver al Panel</a><h1 class="text-4xl md:text-5xl font-extrabold text-slate-900">Detalle de la Transacción</h1><?php if ($transaction): ?><p class="text-slate-500 mt-2">ID: <span id="transaction-id" class="font-mono bg-slate-200 text-slate-700 px-2 py-1 rounded-md text-sm" data-uuid="<?php echo htmlspecialchars($transaction['transaction_uuid']); ?>" data-status="<?php echo htmlspecialchars($current_status); ?>"><?php echo htmlspecialchars($transaction['transaction_uuid']); ?></span></p><?php endif; ?></header>
+        <?php if (!empty($error_message)): ?><div class="card p-6 mb-8 text-center bg-red-50 text-red-700"><i class="fas fa-exclamation-triangle text-3xl mb-3"></i><p class="font-semibold"><?php echo htmlspecialchars($error_message); ?></p></div><?php endif; ?>
         <?php if ($transaction): ?>
-            <div class="card p-6 md:p-8 mb-8">
-                <h2 class="text-2xl font-bold text-slate-800 mb-6">Línea de Tiempo del Proceso</h2>
-                <div class="flex items-center">
-                    <?php $statuses = ['initiated' => 'Inicio', 'funded' => 'En Custodia', 'shipped' => 'Enviado', 'received' => 'Recibido', 'released' => 'Liberado']; if($current_status === 'dispute') $statuses['dispute'] = 'En Disputa'; $keys = array_keys($statuses); foreach($statuses as $status_key => $status_name): if($current_status !== 'dispute' && $status_key === 'dispute') continue; $step_class = get_status_class($status_key, $transaction['status']); $line_class = get_line_class($status_key, $transaction['status']); ?>
-                        <div class="flex-1 flex flex-col items-center text-center"><div class="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg timeline-step <?php echo $step_class; ?>"><?php echo ($step_class == 'timeline-step-complete' || $step_class == 'timeline-step-special') ? '<i class="fas fa-check"></i>' : array_search($status_key, $keys) + 1; ?></div><p class="mt-2 text-sm font-medium text-slate-700"><?php echo $status_name; ?></p></div>
-                        <?php if ($status_key !== 'released' && $status_key !== 'dispute'): ?><div class="timeline-line <?php echo $line_class; ?>"></div><?php endif; ?>
-                    <?php endforeach; ?>
+            <div id="main-content">
+                <div class="card p-6 md:p-8 mb-8">
+                    <h2 class="text-2xl font-bold text-slate-800 mb-6">Línea de Tiempo del Proceso</h2>
+                    <div class="flex items-center">
+                        <?php $statuses = ['initiated' => 'Inicio', 'funded' => 'En Custodia', 'shipped' => 'Enviado', 'received' => 'Recibido', 'released' => 'Liberado']; if($current_status === 'dispute') $statuses['dispute'] = 'En Disputa'; $keys = array_keys($statuses); foreach($statuses as $status_key => $status_name): if($current_status !== 'dispute' && $status_key === 'dispute') continue; $step_class = get_status_class($status_key, $transaction['status']); $line_class = get_line_class($status_key, $transaction['status']); ?>
+                            <div class="flex-1 flex flex-col items-center text-center"><div class="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg timeline-step <?php echo $step_class; ?>"><?php echo ($step_class == 'timeline-step-complete' || $step_class == 'timeline-step-special') ? '<i class="fas fa-check"></i>' : array_search($status_key, $keys) + 1; ?></div><p class="mt-2 text-sm font-medium text-slate-700"><?php echo htmlspecialchars($status_name); ?></p></div>
+                            <?php if ($status_key !== 'released' && $status_key !== 'dispute'): ?><div class="timeline-line <?php echo $line_class; ?>"></div><?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
                 </div>
-            </div>
-            <div class="grid lg:grid-cols-12 gap-8">
-                <div class="lg:col-span-4 card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Chat de la Transacción</h2><div id="chat-box" class="h-[32rem] overflow-y-auto space-y-6 pr-4"><?php if (empty($messages)): ?><div class="text-center py-10 text-slate-400"><i class="fas fa-comments text-4xl mb-3"></i><p>Aún no hay mensajes.</p></div><?php else: foreach ($messages as $msg): ?><div class="flex <?php echo ($msg['sender_role'] === $user_role) ? 'justify-end' : 'justify-start'; ?>"><div class="p-4 max-w-md <?php echo ($msg['sender_role'] === $user_role) ? 'chat-bubble-me' : 'chat-bubble-other'; ?>"><?php if (!empty($msg['image_path'])): ?><a href="<?php echo htmlspecialchars($msg['image_path']); ?>" target="_blank" class="block mb-2"><img src="<?php echo htmlspecialchars($msg['image_path']); ?>" alt="Imagen adjunta" class="rounded-lg max-h-48 w-full object-cover"></a><?php endif; ?><?php if (!empty($msg['message'])): ?><p class="text-md <?php echo ($msg['sender_role'] === $user_role) ? 'text-white' : 'text-slate-800'; ?>"><?php echo nl2br(htmlspecialchars($msg['message'])); ?></p><?php endif; ?><p class="text-xs <?php echo ($msg['sender_role'] === $user_role) ? 'text-slate-400' : 'text-slate-500'; ?> mt-2 text-right"><?php echo $msg['sender_role']; ?> - <?php echo date("d/m H:i", strtotime($msg['created_at'])); ?></p></div></div><?php endforeach; endif; ?></div><?php if (in_array($user_role, ['Comprador', 'Vendedor']) && !$is_finished): ?><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" enctype="multipart/form-data" class="pt-6 border-t mt-4"><div class="flex items-start space-x-3"><div class="relative flex-grow"><textarea id="message-input" name="message_content" placeholder="Escribe tu mensaje..." class="w-full p-3 pr-12 border border-slate-300 rounded-xl resize-none overflow-hidden" rows="1"></textarea><label for="image-upload" class="absolute right-3 top-3 cursor-pointer p-1 text-slate-500 hover:text-slate-800"><i class="fas fa-paperclip"></i><input id="image-upload" name="product_image" type="file" class="hidden" accept="image/*"></label></div><button type="submit" name="send_message" class="bg-slate-800 text-white font-bold h-12 w-12 rounded-full flex items-center justify-center hover:bg-slate-900 transition-colors"><i class="fas fa-paper-plane"></i></button></div></form><?php endif; ?></div>
-                <div class="lg:col-span-5 space-y-8"><div class="card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Detalles del Acuerdo</h2><div class="space-y-4"><div class="flex justify-between items-baseline"><span class="text-slate-500">Producto/Servicio:</span><span class="font-semibold text-right text-slate-900"><?php echo htmlspecialchars($transaction['product_description']); ?></span></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Comprador:</span><a href="profile.php?id=<?php echo $transaction['buyer_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['buyer_name']); ?></a></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Vendedor:</span><a href="profile.php?id=<?php echo $transaction['seller_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['seller_name']); ?></a></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Monto del Acuerdo:</span><span class="font-semibold text-right text-slate-900">$<?php echo number_format($transaction['amount'], 2); ?> COP</span></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Comisión:</span><span class="font-semibold text-right text-red-600">- $<?php echo number_format($transaction['commission'], 2); ?> COP</span></div><hr class="border-dashed"><div class="flex justify-between items-baseline"><span class="font-bold text-lg text-slate-800">El Vendedor Recibirá:</span><span class="font-bold text-lg text-right text-green-600">$<?php echo number_format($transaction['net_amount'], 2); ?> COP</span></div></div></div>
-                <?php if ($is_finished && $current_status === 'released'): ?>
-                    <div class="card p-6 md:p-8">
-                        <h2 class="text-2xl font-bold text-slate-800 mb-6">Calificaciones</h2>
-                        <div class="space-y-8">
-                            <div>
-                                <h3 class="font-semibold text-lg mb-2">Calificación para el Vendedor</h3>
-                                <?php if ($user_role === 'Comprador' && is_null($transaction['seller_rating'])): ?>
-                                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>"><div class="rating"><input type="radio" id="seller-star5" name="rating" value="5" /><label for="seller-star5"></label><input type="radio" id="seller-star4" name="rating" value="4" /><label for="seller-star4"></label><input type="radio" id="seller-star3" name="rating" value="3" /><label for="seller-star3"></label><input type="radio" id="seller-star2" name="rating" value="2" /><label for="seller-star2"></label><input type="radio" id="seller-star1" name="rating" value="1" /><label for="seller-star1"></label></div><textarea name="comment" class="w-full p-3 mt-4 border rounded-lg" rows="3" placeholder="Deja un comentario..."></textarea><button type="submit" name="submit_rating" class="mt-4 w-full bg-slate-800 text-white font-bold py-3 rounded-lg">Enviar Calificación</button></form>
-                                <?php elseif (!is_null($transaction['seller_rating'])): ?><div class="p-4 bg-slate-50 rounded-lg"><?php for($i=0; $i<$transaction['seller_rating']; $i++) { echo '<i class="fas fa-star text-yellow-400"></i>'; } for($i=$transaction['seller_rating']; $i<5; $i++) { echo '<i class="fas fa-star text-gray-300"></i>'; } ?><p class="mt-2 text-slate-600 italic">"<?php echo htmlspecialchars($transaction['seller_comment']); ?>"</p><p class="text-xs text-right text-slate-500 mt-2">- Calificación del Comprador</p></div>
-                                <?php else: ?><p class="text-slate-500 italic p-4 text-center">Esperando calificación del Comprador.</p><?php endif; ?>
-                            </div>
-                            <hr class="border-dashed">
-                             <div>
-                                <h3 class="font-semibold text-lg mb-2">Calificación para el Comprador</h3>
-                                <?php if ($user_role === 'Vendedor' && is_null($transaction['buyer_rating'])): ?>
-                                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>"><div class="rating"><input type="radio" id="buyer-star5" name="rating" value="5" /><label for="buyer-star5"></label><input type="radio" id="buyer-star4" name="rating" value="4" /><label for="buyer-star4"></label><input type="radio" id="buyer-star3" name="rating" value="3" /><label for="buyer-star3"></label><input type="radio" id="buyer-star2" name="rating" value="2" /><label for="buyer-star2"></label><input type="radio" id="buyer-star1" name="rating" value="1" /><label for="buyer-star1"></label></div><textarea name="comment" class="w-full p-3 mt-4 border rounded-lg" rows="3" placeholder="Deja un comentario..."></textarea><button type="submit" name="submit_rating" class="mt-4 w-full bg-slate-800 text-white font-bold py-3 rounded-lg">Enviar Calificación</button></form>
-                                <?php elseif (!is_null($transaction['buyer_rating'])): ?><div class="p-4 bg-slate-50 rounded-lg"><?php for($i=0; $i<$transaction['buyer_rating']; $i++) { echo '<i class="fas fa-star text-yellow-400"></i>'; } for($i=$transaction['buyer_rating']; $i<5; $i++) { echo '<i class="fas fa-star text-gray-300"></i>'; } ?><p class="mt-2 text-slate-600 italic">"<?php echo htmlspecialchars($transaction['buyer_comment']); ?>"</p><p class="text-xs text-right text-slate-500 mt-2">- Calificación del Vendedor</p></div>
-                                <?php else: ?><p class="text-slate-500 italic p-4 text-center">Esperando calificación del Vendedor.</p><?php endif; ?>
+                <div class="grid lg:grid-cols-12 gap-8">
+                    <div class="lg:col-span-4 card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Chat de la Transacción</h2><div id="chat-box" class="h-[32rem] overflow-y-auto space-y-6 pr-4" data-last-message-id="<?php echo $last_message_id; ?>"><?php if (empty($messages)): ?><div id="no-messages" class="text-center py-10 text-slate-400"><i class="fas fa-comments text-4xl mb-3"></i><p>Aún no hay mensajes.</p></div><?php else: foreach ($messages as $msg): ?><div class="flex <?php echo ($msg['sender_role'] === $user_role) ? 'justify-end' : 'justify-start'; ?>"><div class="p-4 max-w-md <?php echo ($msg['sender_role'] === $user_role) ? 'chat-bubble-me' : 'chat-bubble-other'; ?>"><?php if (!empty($msg['image_path'])): ?><a href="<?php echo htmlspecialchars($msg['image_path']); ?>" target="_blank" class="block mb-2"><img src="<?php echo htmlspecialchars($msg['image_path']); ?>" alt="Imagen adjunta" class="rounded-lg max-h-48 w-full object-cover"></a><?php endif; ?><?php if (!empty($msg['message'])): ?><p class="text-md <?php echo ($msg['sender_role'] === $user_role) ? 'text-white' : 'text-slate-800'; ?>"><?php echo nl2br(htmlspecialchars($msg['message'])); ?></p><?php endif; ?><p class="text-xs <?php echo ($msg['sender_role'] === $user_role) ? 'text-slate-400' : 'text-slate-500'; ?> mt-2 text-right"><?php echo htmlspecialchars($msg['sender_role']); ?> - <?php echo htmlspecialchars(date("d/m H:i", strtotime($msg['created_at']))); ?></p></div></div><?php endforeach; endif; ?></div><?php if (in_array($user_role, ['Comprador', 'Vendedor']) && !in_array($current_status, ['released', 'cancelled'])): ?><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" enctype="multipart/form-data" class="pt-6 border-t mt-4"><div class="flex items-start space-x-3"><div class="relative flex-grow"><textarea id="message-input" name="message_content" placeholder="Escribe tu mensaje..." class="w-full p-3 pr-12 border border-slate-300 rounded-xl resize-none overflow-hidden" rows="1"></textarea><label for="image-upload" class="absolute right-3 top-3 cursor-pointer p-1 text-slate-500 hover:text-slate-800"><i class="fas fa-paperclip"></i><input id="image-upload" name="product_image" type="file" class="hidden" accept="image/*"></label></div><button type="submit" name="send_message" class="bg-slate-800 text-white font-bold h-12 w-12 rounded-full flex items-center justify-center hover:bg-slate-900 transition-colors"><i class="fas fa-paper-plane"></i></button></div></form><?php endif; ?></div>
+                    <div class="lg:col-span-5 space-y-8"><div class="card p-6 md:p-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Detalles del Acuerdo</h2><div class="space-y-4"><div class="flex justify-between items-baseline"><span class="text-slate-500">Producto/Servicio:</span><span class="font-semibold text-right text-slate-900"><?php echo htmlspecialchars($transaction['product_description']); ?></span></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Comprador:</span><a href="profile.php?id=<?php echo $transaction['buyer_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['buyer_name']); ?></a></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Vendedor:</span><a href="profile.php?id=<?php echo $transaction['seller_id']; ?>" class="font-semibold text-right text-slate-600 hover:underline"><?php echo htmlspecialchars($transaction['seller_name']); ?></a></div><hr><div class="flex justify-between items-baseline"><span class="text-slate-500">Monto del Acuerdo:</span><span class="font-semibold text-right text-slate-900">$<?php echo htmlspecialchars(number_format($transaction['amount'], 2)); ?> COP</span></div><div class="flex justify-between items-baseline"><span class="text-slate-500">Comisión:</span><span class="font-semibold text-right text-red-600">- $<?php echo htmlspecialchars(number_format($transaction['commission'], 2)); ?> COP</span></div><hr class="border-dashed"><div class="flex justify-between items-baseline"><span class="font-bold text-lg text-slate-800">El Vendedor Recibirá:</span><span class="font-bold text-lg text-right text-green-600">$<?php echo htmlspecialchars(number_format($transaction['net_amount'], 2)); ?> COP</span></div></div></div>
+                    <?php if ($current_status === 'released'): ?>
+                        <div class="card p-6 md:p-8">
+                            <h2 class="text-2xl font-bold text-slate-800 mb-6">Calificaciones</h2>
+                            <div class="space-y-8">
+                                <div><h3 class="font-semibold text-lg mb-2">Calificación para el Vendedor</h3><?php if ($user_role === 'Comprador' && is_null($transaction['seller_rating'])): ?><form method="POST" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>"><div class="rating"><input type="radio" id="seller-star5" name="rating" value="5" /><label for="seller-star5"></label><input type="radio" id="seller-star4" name="rating" value="4" /><label for="seller-star4"></label><input type="radio" id="seller-star3" name="rating" value="3" /><label for="seller-star3"></label><input type="radio" id="seller-star2" name="rating" value="2" /><label for="seller-star2"></label><input type="radio" id="seller-star1" name="rating" value="1" /><label for="seller-star1"></label></div><textarea name="comment" class="w-full p-3 mt-4 border rounded-lg" rows="3" placeholder="Deja un comentario..."></textarea><button type="submit" name="submit_rating" class="mt-4 w-full bg-slate-800 text-white font-bold py-3 rounded-lg">Enviar Calificación</button></form><?php elseif (!is_null($transaction['seller_rating'])): ?><div class="p-4 bg-slate-50 rounded-lg"><?php for($i=0; $i<$transaction['seller_rating']; $i++) { echo '<i class="fas fa-star text-yellow-400"></i>'; } for($i=$transaction['seller_rating']; $i<5; $i++) { echo '<i class="fas fa-star text-gray-300"></i>'; } ?><p class="mt-2 text-slate-600 italic">"<?php echo htmlspecialchars($transaction['seller_comment']); ?>"</p><p class="text-xs text-right text-slate-500 mt-2">- Calificación del Comprador</p></div><?php else: ?><p class="text-slate-500 italic p-4 text-center">Esperando calificación del Comprador.</p><?php endif; ?></div>
+                                <hr class="border-dashed">
+                                <div><h3 class="font-semibold text-lg mb-2">Calificación para el Comprador</h3><?php if ($user_role === 'Vendedor' && is_null($transaction['buyer_rating'])): ?><form method="POST" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>"><div class="rating"><input type="radio" id="buyer-star5" name="rating" value="5" /><label for="buyer-star5"></label><input type="radio" id="buyer-star4" name="rating" value="4" /><label for="buyer-star4"></label><input type="radio" id="buyer-star3" name="rating" value="3" /><label for="buyer-star3"></label><input type="radio" id="buyer-star2" name="rating" value="2" /><label for="buyer-star2"></label><input type="radio" id="buyer-star1" name="rating" value="1" /><label for="buyer-star1"></label></div><textarea name="comment" class="w-full p-3 mt-4 border rounded-lg" rows="3" placeholder="Deja un comentario..."></textarea><button type="submit" name="submit_rating" class="mt-4 w-full bg-slate-800 text-white font-bold py-3 rounded-lg">Enviar Calificación</button></form><?php elseif (!is_null($transaction['buyer_rating'])): ?><div class="p-4 bg-slate-50 rounded-lg"><?php for($i=0; $i<$transaction['buyer_rating']; $i++) { echo '<i class="fas fa-star text-yellow-400"></i>'; } for($i=$transaction['buyer_rating']; $i<5; $i++) { echo '<i class="fas fa-star text-gray-300"></i>'; } ?><p class="mt-2 text-slate-600 italic">"<?php echo htmlspecialchars($transaction['buyer_comment']); ?>"</p><p class="text-xs text-right text-slate-500 mt-2">- Calificación del Vendedor</p></div><?php else: ?><p class="text-slate-500 italic p-4 text-center">Esperando calificación del Vendedor.</p><?php endif; ?></div>
                             </div>
                         </div>
+                    <?php endif; ?>
                     </div>
-                <?php endif; ?>
+                    <div class="lg:col-span-3"><div class="card p-6 md:p-8 sticky top-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2><div class="text-center"><p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo htmlspecialchars($user_role); ?></span></p><?php if (!$is_finished && $current_status !== 'dispute'): ?><?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?><div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b"><h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura.</p><form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors"><i class="fas fa-wallet mr-2"></i>Pagar con Wompi</button></form></div><?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div><?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
+                    <?php elseif ($current_status === 'received'): ?>
+                        <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b">
+                            <h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3>
+                            <?php if ($user_role === 'Vendedor'): ?>
+                                <p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente cuando finalice el tiempo.</p>
+                            <?php elseif ($user_role === 'Comprador'): ?>
+                                <p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p>
+                                <form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4">
+                                    <input type="hidden" name="new_status" value="released">
+                                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button>
+                                </form>
+                                <a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center">
+                                    <i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema
+                                </a>
+                            <?php endif; ?>
+                            <?php if (!empty($transaction['release_funds_at'])): ?>
+                                <div class="mt-4">
+                                    <p class="text-xs text-slate-500">Tiempo restante:</p>
+                                    <?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?>
+                                    <div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div>
+                                    <div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 0%"></div></div>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?><p class="text-slate-500 italic py-6">Esperando a la otra parte.</p><?php endif; ?>
+                    <?php elseif($current_status === 'dispute'): ?>
+                        <div class="p-4 bg-red-50 border-t-4 border-red-400 rounded-b">
+                            <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
+                            <p class="text-sm text-slate-600 mt-2">La transacción está pausada. Usa el chat para comunicarte o espera la intervención de un administrador.</p>
+                        </div>
+                    <?php else: ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-green-800"><i class="fas fa-check-circle mr-2"></i>Transacción Finalizada</h3></div><?php endif; ?></div></div></div>
                 </div>
-                <div class="lg:col-span-3"><div class="card p-6 md:p-8 sticky top-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2><div class="text-center"><p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo $user_role; ?></span></p><?php if (!$is_finished): ?><?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?><div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b"><h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura.</p><form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors"><i class="fas fa-wallet mr-2"></i>Pagar con Wompi</button></form></div><?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div><?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
-                <?php elseif ($current_status === 'received'): ?>
-                    <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b">
-                        <h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3>
-                        <?php if ($user_role === 'Vendedor'): ?>
-                            <p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente cuando finalice el tiempo.</p>
-                        <?php elseif ($user_role === 'Comprador'): ?>
-                            <p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p>
-                            <form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4">
-                                <input type="hidden" name="new_status" value="released">
-                                <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button>
-                            </form>
-                            <a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center">
-                                <i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema (Abrir Disputa)
-                            </a>
-                        <?php endif; ?>
-
-                        <?php if (!empty($transaction['release_funds_at'])): ?>
-                            <div class="mt-4">
-                                <p class="text-xs text-slate-500">Tiempo restante:</p>
-                                <?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?>
-                                <div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div>
-                                <div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 0%"></div></div>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                <?php elseif($current_status === 'dispute'): ?>
-                    <div class="p-4 bg-red-50 border-t-4 border-red-400 rounded-b">
-                        <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
-                        <p class="text-sm text-slate-600 mt-2">La transacción está pausada. Usa el chat para comunicarte con la otra parte o espera la intervención de un administrador.</p>
-                    </div>
-                <?php else: ?><p class="text-slate-500 italic py-6">Esperando a la otra parte.</p><?php endif; ?><?php else: ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-green-800"><i class="fas fa-check-circle mr-2"></i>Transacción Finalizada</h3><p class="text-sm text-slate-600 mt-2">Puedes dejar tu calificación en el panel central.</p></div><?php endif; ?></div></div></div>
             </div>
         <?php endif; ?>
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            // Lógica para la cuenta regresiva de la garantía
-            const countdownElement = document.getElementById('countdown-timer');
-            if (countdownElement) {
-                const releaseTimestamp = parseInt(countdownElement.dataset.releaseTime, 10);
-                const totalDurationSeconds = parseInt(countdownElement.dataset.totalDuration, 10);
-                const progressBar = document.getElementById('progress-bar');
+            const transactionIdElement = document.getElementById('transaction-id');
+            if (!transactionIdElement) return;
 
-                if (!isNaN(releaseTimestamp)) {
-                    const interval = setInterval(function() {
-                        const now = new Date().getTime();
-                        const distance = releaseTimestamp - now;
+            const transactionUUID = transactionIdElement.dataset.uuid;
+            let currentUserRole = '<?php echo $user_role; ?>';
+            let pollingInterval;
 
-                        if (distance < 0) {
-                            clearInterval(interval);
-                            countdownElement.innerHTML = "Liberando...";
-                            if(progressBar) progressBar.style.width = '100%';
-                            setTimeout(() => window.location.reload(), 2000);
-                        } else {
-                            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
-                            countdownElement.innerHTML = (minutes < 10 ? '0' : '') + minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
+            const checkForUpdates = async () => {
+                try {
+                    const chatBox = document.getElementById('chat-box');
+                    const lastMessageId = chatBox.dataset.lastMessageId || 0;
+                    const currentStatus = document.getElementById('transaction-id').dataset.status;
 
-                            if (progressBar && !isNaN(totalDurationSeconds)) {
-                                const elapsedSeconds = totalDurationSeconds - (distance / 1000);
-                                const progressPercentage = Math.min((elapsedSeconds / totalDurationSeconds) * 100, 100);
-                                progressBar.style.width = `${progressPercentage}%`;
+                    const response = await fetch(`get_transaction_updates.php?tx_uuid=${transactionUUID}&last_message_id=${lastMessageId}&current_status=${currentStatus}`);
+                    if (!response.ok) return;
+
+                    const data = await response.json();
+
+                    if (data.error) {
+                        console.error('Error del servidor:', data.error);
+                        // Detener el polling si hay un error para no sobrecargar
+                        if(pollingInterval) clearInterval(pollingInterval);
+                        return;
+                    }
+
+                    if (data.status_changed) {
+                        window.location.reload();
+                        return;
+                    }
+
+                    if (data.new_messages && data.new_messages.length > 0) {
+                        const noMessagesEl = document.getElementById('no-messages');
+                        if(noMessagesEl) noMessagesEl.style.display = 'none';
+
+                        data.new_messages.forEach(msg => {
+                            const messageIsMine = msg.sender_role === currentUserRole;
+                            const bubbleClasses = messageIsMine ? 'chat-bubble-me' : 'chat-bubble-other';
+                            const justifyClass = messageIsMine ? 'justify-end' : 'justify-start';
+                            const textColor = messageIsMine ? 'text-white' : 'text-slate-800';
+                            const metaColor = messageIsMine ? 'text-slate-400' : 'text-slate-500';
+
+                            let imageHtml = '';
+                            if (msg.image_path) {
+                                imageHtml = `<a href="${msg.image_path}" target="_blank" class="block mb-2"><img src="${msg.image_path}" alt="Imagen adjunta" class="rounded-lg max-h-48 w-full object-cover"></a>`;
                             }
-                        }
-                    }, 1000);
+
+                            const msgHtml = `
+                                <div class="flex ${justifyClass}">
+                                    <div class="p-4 max-w-md ${bubbleClasses}">
+                                        ${imageHtml}
+                                        <p class="text-md ${textColor}">${msg.message}</p>
+                                        <p class="text-xs ${metaColor} mt-2 text-right">${msg.sender_role} - ${msg.created_at}</p>
+                                    </div>
+                                </div>
+                            `;
+                            chatBox.innerHTML += msgHtml;
+                        });
+
+                        chatBox.dataset.lastMessageId = data.new_messages[data.new_messages.length - 1].id;
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+
+                } catch (error) {
+                    console.error('Error al buscar actualizaciones:', error);
                 }
-            }
+            };
 
-            // Lógica para el escáner QR y confirmación manual
-            const scanBtn = document.getElementById('scan-qr-btn');
-            const scannerContainer = document.getElementById('qr-scanner-container');
-            const scanResult = document.getElementById('scan-result');
-            const stopBtn = document.getElementById('stop-scan-btn');
-            const confirmReceptionForm = document.getElementById('confirm-reception-form');
-            const manualConfirmBtn = document.getElementById('manual-confirm-btn');
-            let html5QrCode;
-
-            if(scanBtn) {
-                 scanBtn.addEventListener('click', () => {
-                     scannerContainer.style.display = 'block';
-                     scanBtn.style.display = 'none';
-                     html5QrCode = new Html5Qrcode("qr-reader");
-                     html5QrCode.start(
-                         { facingMode: "environment" },
-                         { fps: 10, qrbox: { width: 250, height: 250 } },
-                         (decodedText, decodedResult) => {
-                             scanResult.innerHTML = `Detectado! Verificando...`;
-                             html5QrCode.stop().then(() => {
-                                 if (decodedText.startsWith("INTERPAGO_TX_")) {
-                                     if(confirm('Código QR válido. ¿Deseas confirmar la recepción del producto e iniciar el período de garantía?')) {
-                                        confirmReceptionForm.submit();
-                                     }
-                                 } else {
-                                     scanResult.innerHTML = `<span class="text-red-600">Código QR no válido.</span>`;
-                                     setTimeout(() => {
-                                        scannerContainer.style.display = 'none';
-                                        scanBtn.style.display = 'block';
-                                        scanResult.innerHTML = '';
-                                     }, 2000);
-                                 }
-                             });
-                         },
-                         (errorMessage) => { /* No hacer nada en caso de error de escaneo */ }
-                     ).catch((err) => {
-                        scanResult.innerHTML = `<span class="text-red-600">No se pudo iniciar la cámara.</span>`;
-                     });
-                 });
-            }
-             if(stopBtn) {
-                 stopBtn.addEventListener('click', () => {
-                     if (html5QrCode && html5QrCode.isScanning) {
-                        html5QrCode.stop().catch(err => console.error("Error al detener el escáner:", err));
-                     }
-                     scannerContainer.style.display = 'none';
-                     scanBtn.style.display = 'block';
-                 });
-             }
-             if(manualConfirmBtn) {
-                manualConfirmBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    if(confirm('¿Estás seguro de que recibiste el producto? Esta acción iniciará el período de garantía y no se puede deshacer.')) {
-                        confirmReceptionForm.submit();
-                    }
-                });
-             }
-
-            // Lógica para el formulario de liberación de fondos
-            const releaseFundsForm = document.getElementById('release-funds-form');
-            if(releaseFundsForm) {
-                releaseFundsForm.addEventListener('submit', function(e) {
-                    if(!confirm('¿Estás seguro? Al liberar los fondos, la transacción se completará y el dinero se enviará al vendedor.')) {
-                        e.preventDefault();
-                    }
-                });
-            }
-
-            // Lógica para auto-expandir el textarea del chat
-            const textarea = document.getElementById('message-input');
-            if (textarea) {
-                textarea.addEventListener('input', function () {
-                    this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px';
-                });
-            }
-
-            // Lógica para hacer scroll automático en el chat
-            const chatBox = document.getElementById('chat-box');
-            if (chatBox) { chatBox.scrollTop = chatBox.scrollHeight; }
+            pollingInterval = setInterval(checkForUpdates, 4000);
         });
     </script>
 </body>
