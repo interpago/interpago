@@ -6,3 +6,5 @@ config.php
 
 # Carpeta de dependencias de Composer
 /vendor/
+
+.
