@@ -15,66 +15,14 @@ $user_id = $_SESSION['user_id'];
 $message = '';
 $message_type = '';
 
-// Obtener los datos actuales del usuario
-$stmt = $conn->prepare("SELECT name, email, document_type, document_number, profile_picture, password_hash, verification_status FROM users WHERE id = ?");
+// Obtener los datos actuales del usuario para mostrarlos en el formulario
+$stmt = $conn->prepare("SELECT name, email, document_type, document_number, profile_picture, password_hash, verification_status, user_uuid, bio FROM users WHERE id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $user = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 if (!$user) { die("Error: Usuario no encontrado."); }
-
-// --- OBTENER DATOS DE REPUTACIÓN ---
-$reputation_data = [
-    'completed_transactions' => 0,
-    'disputed_transactions' => 0,
-    'avg_seller_rating' => 0,
-    'seller_ratings_count' => 0,
-    'avg_buyer_rating' => 0,
-    'buyer_ratings_count' => 0,
-    'recent_reviews' => []
-];
-
-// Obtener transacciones completadas, en disputa y calificaciones
-$rep_stmt = $conn->prepare("
-    SELECT
-        (SELECT COUNT(*) FROM transactions WHERE (buyer_id = ? OR seller_id = ?) AND status = 'released') as completed_count,
-        (SELECT COUNT(*) FROM transactions WHERE (buyer_id = ? OR seller_id = ?) AND status = 'dispute') as disputed_count,
-        (SELECT AVG(seller_rating) FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL) as avg_seller,
-        (SELECT COUNT(seller_rating) FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL) as count_seller,
-        (SELECT AVG(buyer_rating) FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL) as avg_buyer,
-        (SELECT COUNT(buyer_rating) FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL) as count_buyer
-");
-$rep_stmt->bind_param("iiiiiiii", $user_id, $user_id, $user_id, $user_id, $user_id, $user_id, $user_id, $user_id);
-$rep_stmt->execute();
-$rep_result = $rep_stmt->get_result()->fetch_assoc();
-
-if ($rep_result) {
-    $reputation_data['completed_transactions'] = $rep_result['completed_count'];
-    $reputation_data['disputed_transactions'] = $rep_result['disputed_count'];
-    $reputation_data['avg_seller_rating'] = $rep_result['avg_seller'] ?? 0;
-    $reputation_data['seller_ratings_count'] = $rep_result['count_seller'];
-    $reputation_data['avg_buyer_rating'] = $rep_result['avg_buyer'] ?? 0;
-    $reputation_data['buyer_ratings_count'] = $rep_result['count_buyer'];
-}
-$rep_stmt->close();
-
-// Obtener últimos 3 comentarios como vendedor
-$reviews_seller_stmt = $conn->prepare("SELECT seller_rating as rating, seller_comment as comment, buyer_name as author_name FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL ORDER BY completed_at DESC LIMIT 3");
-$reviews_seller_stmt->bind_param("i", $user_id);
-$reviews_seller_stmt->execute();
-$reviews_seller = $reviews_seller_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$reviews_seller_stmt->close();
-
-// Obtener últimos 3 comentarios como comprador
-$reviews_buyer_stmt = $conn->prepare("SELECT buyer_rating as rating, buyer_comment as comment, seller_name as author_name FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL ORDER BY completed_at DESC LIMIT 3");
-$reviews_buyer_stmt->bind_param("i", $user_id);
-$reviews_buyer_stmt->execute();
-$reviews_buyer = $reviews_buyer_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$reviews_buyer_stmt->close();
-
-$reputation_data['recent_reviews'] = array_merge($reviews_seller, $reviews_buyer);
-
 
 // Procesar el formulario de actualización
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -101,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($update_stmt->execute()) {
                 $message = 'Contraseña actualizada con éxito.';
                 $message_type = 'success';
-                $user['password_hash'] = $new_password_hash;
+                $user['password_hash'] = $new_password_hash; // Actualizar localmente para la sesión
             } else {
                 $message = 'Error al actualizar la contraseña.';
                 $message_type = 'error';
@@ -114,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $upload_dir = __DIR__ . '/uploads/profiles/';
         if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
         $file_extension = pathinfo($_FILES['profile_picture']['name'], PATHINFO_EXTENSION);
-        $file_name = $_SESSION['user_uuid'] . '.' . $file_extension;
+        $file_name = $user['user_uuid'] . '.' . $file_extension;
         $target_file = $upload_dir . $file_name;
 
         if (move_uploaded_file($_FILES['profile_picture']['tmp_name'], $target_file)) {
@@ -146,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $upload_dir = __DIR__ . '/uploads/documents/';
             if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
             $file_extension = pathinfo($_FILES['document_image']['name'], PATHINFO_EXTENSION);
-            $file_name = 'doc_' . $_SESSION['user_uuid'] . '.' . $file_extension;
+            $file_name = 'doc_' . $user['user_uuid'] . '.' . $file_extension;
             $target_file = $upload_dir . $file_name;
 
             if (move_uploaded_file($_FILES['document_image']['tmp_name'], $target_file)) {
@@ -155,15 +103,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $update_doc_stmt = $conn->prepare("UPDATE users SET document_type = ?, document_number = ?, document_image_path = ?, verification_status = ? WHERE id = ?");
                 $update_doc_stmt->bind_param("ssssi", $document_type, $document_number, $db_path, $new_status, $user_id);
 
-                if ($update_doc_stmt->execute()) {
+                // --- INICIO DE LA CORRECCIÓN ---
+                try {
+                    $update_doc_stmt->execute(); // Esta es la línea que causaba el error
                     $message = '¡Documentos enviados! Serán revisados por nuestro equipo pronto.';
                     $message_type = 'success';
-                    $user['verification_status'] = 'pending'; // Actualizar estado local
-                } else {
-                    $message = 'Error al guardar tus documentos en la base de datos.';
-                    $message_type = 'error';
+                    $user['verification_status'] = 'pending'; // Actualizar estado para reflejar el cambio en la página
+                } catch (mysqli_sql_exception $e) {
+                    if ($e->getCode() == 1062) { // Código de error para 'Entrada duplicada'
+                        $message = 'Error: El número de documento que ingresaste ya está registrado por otro usuario. Por favor, verifica la información.';
+                        $message_type = 'error';
+                    } else {
+                        // Para cualquier otro error de base de datos
+                        $message = 'Ocurrió un error en la base de datos. Por favor, intenta de nuevo más tarde.';
+                        $message_type = 'error';
+                        error_log('Error en edit_profile.php al subir documento: ' . $e->getMessage()); // Para tu registro de errores
+                    }
                 }
                 $update_doc_stmt->close();
+                // --- FIN DE LA CORRECCIÓN ---
+
             } else {
                 $message = 'Error al subir la imagen de tu documento.';
                 $message_type = 'error';
@@ -171,6 +130,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+// Obtener datos de reputación
+$reputation_data = [
+    'completed_transactions' => 0,
+    'disputed_transactions' => 0,
+    'avg_seller_rating' => 0,
+    'seller_ratings_count' => 0,
+    'avg_buyer_rating' => 0,
+    'buyer_ratings_count' => 0,
+    'recent_reviews' => []
+];
+
+$rep_stmt = $conn->prepare("SELECT (SELECT COUNT(*) FROM transactions WHERE (buyer_id = ? OR seller_id = ?) AND status = 'released') as completed_count, (SELECT COUNT(*) FROM transactions WHERE (buyer_id = ? OR seller_id = ?) AND status = 'dispute') as disputed_count, (SELECT AVG(seller_rating) FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL) as avg_seller, (SELECT COUNT(seller_rating) FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL) as count_seller, (SELECT AVG(buyer_rating) FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL) as avg_buyer, (SELECT COUNT(buyer_rating) FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL) as count_buyer");
+$rep_stmt->bind_param("iiiiiiii", $user_id, $user_id, $user_id, $user_id, $user_id, $user_id, $user_id, $user_id);
+$rep_stmt->execute();
+$rep_result = $rep_stmt->get_result()->fetch_assoc();
+if ($rep_result) {
+    $reputation_data['completed_transactions'] = $rep_result['completed_count'];
+    $reputation_data['disputed_transactions'] = $rep_result['disputed_count'];
+    $reputation_data['avg_seller_rating'] = $rep_result['avg_seller'] ?? 0;
+    $reputation_data['seller_ratings_count'] = $rep_result['count_seller'];
+    $reputation_data['avg_buyer_rating'] = $rep_result['avg_buyer'] ?? 0;
+    $reputation_data['buyer_ratings_count'] = $rep_result['count_buyer'];
+}
+$rep_stmt->close();
+
+$reviews_seller_stmt = $conn->prepare("SELECT seller_rating as rating, seller_comment as comment, buyer_name as author_name FROM transactions WHERE seller_id = ? AND seller_rating IS NOT NULL ORDER BY completed_at DESC LIMIT 3");
+$reviews_seller_stmt->bind_param("i", $user_id);
+$reviews_seller_stmt->execute();
+$reviews_seller = $reviews_seller_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$reviews_seller_stmt->close();
+
+$reviews_buyer_stmt = $conn->prepare("SELECT buyer_rating as rating, buyer_comment as comment, seller_name as author_name FROM transactions WHERE buyer_id = ? AND buyer_rating IS NOT NULL ORDER BY completed_at DESC LIMIT 3");
+$reviews_buyer_stmt->bind_param("i", $user_id);
+$reviews_buyer_stmt->execute();
+$reviews_buyer = $reviews_buyer_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$reviews_buyer_stmt->close();
+
+$reputation_data['recent_reviews'] = array_merge($reviews_seller, $reviews_buyer);
 ?>
 <!DOCTYPE html>
 <html lang="es">
