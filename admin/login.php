@@ -38,6 +38,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result->num_rows === 1) {
             $admin = $result->fetch_assoc();
             if (password_verify($password, $admin['password_hash'])) {
+                // CORRECCIÓN DE SEGURIDAD: Regenerar ID de sesión para prevenir secuestro de sesión
+                session_regenerate_id(true);
+
                 $_SESSION['loggedin'] = true;
                 $_SESSION['admin_id'] = $admin['id'];
                 $_SESSION['admin_username'] = $admin['username'];
@@ -62,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <style> body { font-family: 'Inter', sans-serif; } </style>
 </head>
 <body class="bg-slate-50">
-    <div class="flex min-h-screen items-center justify-center">
+    <div class="flex min-h-screen items-center justify-center p-4">
         <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg">
             <div class="text-center mb-8">
                 <i class="fas fa-shield-alt text-5xl text-slate-800 mb-3"></i>
@@ -72,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <?php if (!empty($error)): ?>
                 <div class="p-4 mb-4 text-sm bg-red-100 text-red-800 rounded-lg text-center">
-                    <?php echo $error; ?>
+                    <?php echo htmlspecialchars($error); ?>
                 </div>
             <?php endif; ?>
 

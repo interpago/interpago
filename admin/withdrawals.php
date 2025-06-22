@@ -102,21 +102,21 @@ $result = $conn->query("
                             <?php while($row = $result->fetch_assoc()): ?>
                                 <?php $bank_details = json_decode($row['bank_details'], true); ?>
                                 <tr class="bg-white border-b hover:bg-slate-50">
-                                    <td class="px-6 py-4"><?php echo date("d M, Y H:i", strtotime($row['created_at'])); ?></td>
+                                    <td class="px-6 py-4"><?php echo htmlspecialchars(date("d M, Y H:i", strtotime($row['created_at']))); ?></td>
                                     <td class="px-6 py-4">
                                         <p class="font-medium text-slate-900"><?php echo htmlspecialchars($row['user_name']); ?></p>
                                         <p class="text-xs text-slate-500"><?php echo htmlspecialchars($row['user_email']); ?></p>
                                     </td>
-                                    <td class="px-6 py-4 font-bold text-green-600">$<?php echo number_format($row['amount'], 2); ?></td>
+                                    <td class="px-6 py-4 font-bold text-green-600">$<?php echo htmlspecialchars(number_format($row['amount'], 2)); ?></td>
                                     <td class="px-6 py-4 text-xs text-slate-600">
-                                        <strong>Banco:</strong> <?php echo htmlspecialchars($bank_details['bank_name']); ?><br>
-                                        <strong>Tipo:</strong> <?php echo htmlspecialchars($bank_details['account_type']); ?><br>
-                                        <strong>N°:</strong> <?php echo htmlspecialchars($bank_details['account_number']); ?><br>
-                                        <strong>Titular:</strong> <?php echo htmlspecialchars($bank_details['holder_name']); ?><br>
-                                        <strong>C.C:</strong> <?php echo htmlspecialchars($bank_details['holder_id']); ?>
+                                        <strong>Banco:</strong> <?php echo htmlspecialchars($bank_details['bank_name'] ?? 'N/A'); ?><br>
+                                        <strong>Tipo:</strong> <?php echo htmlspecialchars($bank_details['account_type'] ?? 'N/A'); ?><br>
+                                        <strong>N°:</strong> <?php echo htmlspecialchars($bank_details['account_number'] ?? 'N/A'); ?><br>
+                                        <strong>Titular:</strong> <?php echo htmlspecialchars($bank_details['holder_name'] ?? 'N/A'); ?><br>
+                                        <strong>C.C:</strong> <?php echo htmlspecialchars($bank_details['holder_id'] ?? 'N/A'); ?>
                                     </td>
                                     <td class="px-6 py-4">
-                                        <span class="status-pill status-<?php echo htmlspecialchars($row['status']); ?>"><?php echo ucfirst($row['status']); ?></span>
+                                        <span class="status-pill status-<?php echo htmlspecialchars($row['status']); ?>"><?php echo htmlspecialchars(ucfirst($row['status'])); ?></span>
                                     </td>
                                     <td class="px-6 py-4">
                                         <?php if ($row['status'] === 'pending'): ?>
@@ -127,7 +127,7 @@ $result = $conn->query("
                                                 </button>
                                             </form>
                                         <?php else: ?>
-                                            <span class="text-slate-400 italic">Procesado el <?php echo date("d/m/y", strtotime($row['completed_at'])); ?></span>
+                                            <span class="text-slate-400 italic">Procesado el <?php echo htmlspecialchars(date("d/m/y", strtotime($row['completed_at']))); ?></span>
                                         <?php endif; ?>
                                     </td>
                                 </tr>
