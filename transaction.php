@@ -108,7 +108,6 @@ if (!empty($transaction_uuid)) {
             }
         }
 
-        // --- INICIO: Lógica de cálculo de desglose de comisión ---
         if ($transaction['commission_payer'] === 'buyer') {
             $buyer_commission_paid = $transaction['commission'];
         } elseif ($transaction['commission_payer'] === 'seller') {
@@ -117,7 +116,6 @@ if (!empty($transaction_uuid)) {
             $buyer_commission_paid = $transaction['commission'] / 2;
             $seller_commission_paid = $transaction['commission'] / 2;
         }
-        // --- FIN: Lógica de cálculo ---
 
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -374,9 +372,9 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                                 <form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors">Pagar con Wompi ($<?php echo number_format($amount_to_charge_gateway, 2); ?>)</button></form>
                             </div>
                         <?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div>
-                        <?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
+                        <?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4" data-token="<?php echo htmlspecialchars($transaction['qr_code_token'] ?? ''); ?>"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
                         <?php elseif ($current_status === 'received'): ?>
-                            <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b"><h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3><?php if ($user_role === 'Vendedor'): ?><p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente.</p><?php elseif ($user_role === 'Comprador'): ?><p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p><form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4"><input type="hidden" name="new_status" value="released"><button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button></form><a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center"><i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema</a><?php endif; ?><?php if (!empty($transaction['release_funds_at'])): ?><div class="mt-4"><p class="text-xs text-slate-500">Tiempo restante:</p><?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?><div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div><div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 0%"></div></div></div><?php endif; ?></div>
+                            <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b"><h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3><?php if ($user_role === 'Vendedor'): ?><p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente.</p><?php elseif ($user_role === 'Comprador'): ?><p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p><form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4"><input type="hidden" name="new_status" value="released"><button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button></form><a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center"><i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema</a><?php endif; ?><?php if (!empty($transaction['release_funds_at'])): ?><div class="mt-4"><p class="text-xs text-slate-500">Tiempo restante:</p><?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?><div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div><div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 100%"></div></div></div><?php endif; ?></div>
                         <?php elseif($current_status === 'dispute'): ?>
                             <div class="p-4 bg-red-50 border-t-4 border-red-400 rounded-b">
                                 <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
@@ -412,6 +410,7 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            // Lógica de polling para el chat y estado
             const transactionIdElement = document.getElementById('transaction-id');
             if (!transactionIdElement) return;
 
@@ -462,11 +461,13 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                                 imageHtml = `<a href="${msg.image_path}" target="_blank" class="block mb-2"><img src="${msg.image_path}" alt="Imagen adjunta" class="rounded-lg max-h-48 w-full object-cover"></a>`;
                             }
 
+                            let msgText = msg.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
                             const msgHtml = `
                                 <div class="flex ${justifyClass}">
                                     <div class="p-4 max-w-md ${bubbleClasses}">
                                         ${imageHtml}
-                                        <p class="text-md ${textColor}">${msg.message}</p>
+                                        <p class="text-md ${textColor}">${msgText}</p>
                                         <p class="text-xs ${metaColor} mt-2 text-right">${msg.sender_role} - ${msg.created_at}</p>
                                     </div>
                                 </div>
@@ -484,6 +485,135 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
             };
 
             pollingInterval = setInterval(checkForUpdates, 4000);
+        });
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Solo ejecuta este código si estamos en el estado 'shipped' para el comprador
+            const scanBtn = document.getElementById('scan-qr-btn');
+            if (!scanBtn) return;
+
+            const manualConfirmBtn = document.getElementById('manual-confirm-btn');
+            const confirmReceptionForm = document.getElementById('confirm-reception-form');
+
+            const qrScannerContainer = document.getElementById('qr-scanner-container');
+            const stopScanBtn = document.getElementById('stop-scan-btn');
+            const scanResultEl = document.getElementById('scan-result');
+            let html5QrCode;
+
+            // --- Lógica para la confirmación manual ---
+            if (manualConfirmBtn && confirmReceptionForm) {
+                manualConfirmBtn.addEventListener('click', function() {
+                    if (confirm('¿Estás seguro de que quieres confirmar la recepción manualmente?')) {
+                        confirmReceptionForm.submit();
+                    }
+                });
+            }
+
+            // --- Lógica para el escáner QR ---
+            function onScanSuccess(decodedText, decodedResult) {
+                const expectedToken = qrScannerContainer.dataset.token;
+                scanResultEl.style.color = 'red';
+
+                if (decodedText === expectedToken) {
+                    scanResultEl.textContent = '¡Sello verificado correctamente! Confirmando recepción...';
+                    scanResultEl.style.color = 'green';
+
+                    if(html5QrCode && html5QrCode.isScanning) {
+                        html5QrCode.stop().then(ignore => {
+                            confirmReceptionForm.submit();
+                        }).catch(err => {
+                            console.error("Error al detener el escáner al tener éxito:", err);
+                            confirmReceptionForm.submit(); // Intenta enviar de todos modos
+                        });
+                    } else {
+                         confirmReceptionForm.submit();
+                    }
+
+                } else {
+                    scanResultEl.textContent = 'Error: El código QR no coincide con esta transacción.';
+                }
+            }
+
+            function onScanFailure(error) {
+                // No es necesario mostrar un error, el usuario puede seguir intentando escanear.
+            }
+
+            if (scanBtn && qrScannerContainer) {
+                 html5QrCode = new Html5Qrcode("qr-reader");
+
+                scanBtn.addEventListener('click', () => {
+                    qrScannerContainer.style.display = 'block';
+                    scanResultEl.textContent = '';
+
+                    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+                    try {
+                        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
+                            .catch(err => {
+                                scanResultEl.textContent = "Error al iniciar la cámara. Asegúrate de dar permisos.";
+                                console.error("Error al iniciar la cámara:", err);
+                            });
+                    } catch (err) {
+                        scanResultEl.textContent = "No se pudo iniciar el escáner QR en este navegador.";
+                        console.error("Error en Html5Qrcode:", err);
+                    }
+                });
+
+                stopScanBtn.addEventListener('click', () => {
+                     if(html5QrCode && html5QrCode.isScanning) {
+                        html5QrCode.stop().then(ignore => {
+                            qrScannerContainer.style.display = 'none';
+                        }).catch(err => {
+                            console.error("Error al detener el escáner:", err);
+                             qrScannerContainer.style.display = 'none';
+                        });
+                    } else {
+                        qrScannerContainer.style.display = 'none';
+                    }
+                });
+            }
+        });
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const countdownTimerEl = document.getElementById('countdown-timer');
+            const progressBarEl = document.getElementById('progress-bar');
+
+            if (countdownTimerEl && progressBarEl) {
+                const releaseTime = parseInt(countdownTimerEl.dataset.releaseTime, 10);
+                const totalDuration = parseInt(countdownTimerEl.dataset.totalDuration, 10) * 1000;
+
+                if (isNaN(releaseTime) || isNaN(totalDuration)) return;
+
+                const updateCountdown = () => {
+                    const now = Date.now();
+                    const remainingTime = releaseTime - now;
+
+                    if (remainingTime <= 0) {
+                        countdownTimerEl.textContent = '00:00';
+                        if(progressBarEl) progressBarEl.style.width = '100%';
+                        clearInterval(countdownInterval);
+                        // Recargar la página para que el servidor procese la liberación de fondos
+                        setTimeout(() => window.location.reload(), 1500);
+                        return;
+                    }
+
+                    const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
+
+                    countdownTimerEl.textContent =
+                        `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+                    const elapsedTime = totalDuration - remainingTime;
+                    const progressPercentage = Math.min(100, (elapsedTime / totalDuration) * 100);
+
+                    if(progressBarEl) progressBarEl.style.width = `${progressPercentage}%`;
+                };
+
+                const countdownInterval = setInterval(updateCountdown, 1000);
+                updateCountdown();
+            }
         });
     </script>
 </body>
