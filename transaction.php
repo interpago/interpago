@@ -90,12 +90,14 @@ if (!empty($transaction_uuid)) {
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
             if (isset($_POST['generate_qr']) && $user_role === 'Vendedor' && $current_status === 'funded') {
                 $qr_token = "INTERPAGO_TX_" . $transaction['id'] . "_" . bin2hex(random_bytes(16));
                 $update_stmt = $conn->prepare("UPDATE transactions SET qr_code_token = ? WHERE id = ?");
                 $update_stmt->bind_param("si", $qr_token, $transaction['id']);
                 if ($update_stmt->execute()) { header("Location: " . $_SERVER['REQUEST_URI']); exit; }
             }
+
             if (isset($_POST['send_message']) && in_array($user_role, ['Comprador', 'Vendedor']) && !in_array($current_status, ['released', 'cancelled'])) {
                 $message_content = trim($_POST['message_content']);
                 $image_path = null;
@@ -113,36 +115,103 @@ if (!empty($transaction_uuid)) {
                     header("Location: " . $_SERVER['REQUEST_URI']); exit;
                 }
             }
-             if (isset($_POST['new_status'])) {
+
+            // --- INICIO: LÓGICA DE RESOLUCIÓN DE DISPUTAS ---
+            // Acción: Vendedor reembolsa para cerrar disputa
+            if(isset($_POST['seller_refund']) && $user_role === 'Vendedor' && $current_status === 'dispute') {
+                $conn->begin_transaction();
+                try {
+                    // 1. Calcular el monto total que pagó el comprador
+                    $amount_to_refund = $transaction['amount'];
+                    if ($transaction['commission_payer'] === 'buyer') {
+                        $amount_to_refund += $transaction['commission'];
+                    } elseif ($transaction['commission_payer'] === 'split') {
+                        $amount_to_refund += ($transaction['commission'] / 2);
+                    }
+
+                    // 2. Devolver el dinero a la billetera del comprador
+                    $refund_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
+                    $refund_stmt->bind_param("di", $amount_to_refund, $transaction['buyer_id']);
+                    $refund_stmt->execute();
+
+                    // 3. Marcar la transacción como cancelada
+                    $status_stmt = $conn->prepare("UPDATE transactions SET status = 'cancelled', completed_at = NOW() WHERE id = ?");
+                    $status_stmt->bind_param("i", $transaction['id']);
+                    $status_stmt->execute();
+
+                    $conn->commit();
+                    send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => 'cancelled_by_seller']);
+                    header("Location: " . $_SERVER['REQUEST_URI']);
+                    exit;
+                } catch(Exception $e) {
+                    $conn->rollback();
+                    $error_message = "Error al procesar el reembolso.";
+                }
+            }
+            // --- FIN: LÓGICA DE RESOLUCIÓN DE DISPUTAS ---
+
+            if (isset($_POST['new_status'])) {
                 $new_status = $_POST['new_status'];
                 $allowed = false;
-                $transitions = ['Vendedor' => ['funded' => 'shipped'], 'Comprador' => ['shipped' => 'received', 'received' => 'released']];
-                if (isset($transitions[$user_role][$current_status]) && $transitions[$user_role][$current_status] === $new_status) { $allowed = true; }
+
+                $transitions = [
+                    'Vendedor' => ['funded' => 'shipped'],
+                    'Comprador' => [
+                        'shipped' => 'received',
+                        'received' => 'released',
+                        'dispute' => ['released', 'received']
+                    ]
+                ];
+
+                // Lógica de transición de estado
+                if (isset($transitions[$user_role][$current_status])) {
+                    $allowed_transitions = $transitions[$user_role][$current_status];
+                    if (is_array($allowed_transitions) && in_array($new_status, $allowed_transitions)) {
+                        $allowed = true;
+                    } elseif (is_string($allowed_transitions) && $allowed_transitions === $new_status) {
+                        $allowed = true;
+                    }
+                }
+
                 if ($allowed) {
                     $conn->begin_transaction();
                     try {
                         if ($new_status === 'received') {
-                            $inspection_period = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10;
-                            $update_stmt = $conn->prepare("UPDATE transactions SET status = 'received', release_funds_at = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE transaction_uuid = ?");
-                            $update_stmt->bind_param("is", $inspection_period, $transaction_uuid);
+                            if ($current_status === 'shipped') {
+                                $inspection_period = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10;
+                                $update_stmt = $conn->prepare("UPDATE transactions SET status = 'received', release_funds_at = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE transaction_uuid = ?");
+                                $update_stmt->bind_param("is", $inspection_period, $transaction_uuid);
+                            } else {
+                                $update_stmt = $conn->prepare("UPDATE transactions SET status = 'received' WHERE transaction_uuid = ?");
+                                $update_stmt->bind_param("s", $transaction_uuid);
+                            }
                             $update_stmt->execute();
                         } else {
-                            $sql_update = "UPDATE transactions SET status = ?"; $params_update = [$new_status]; $types_update = "s";
+                            $sql_update = "UPDATE transactions SET status = ?";
+                            $params_update = [$new_status];
+                            $types_update = "s";
+
                             if ($new_status === 'released') {
                                 $sql_update .= ", completed_at = NOW()";
                                 $balance_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
                                 $balance_stmt->bind_param("di", $transaction['net_amount'], $transaction['seller_id']);
                                 $balance_stmt->execute();
                             }
-                            $sql_update .= " WHERE transaction_uuid = ?"; $params_update[] = $transaction_uuid; $types_update .= "s";
+
+                            $sql_update .= " WHERE transaction_uuid = ?";
+                            $params_update[] = $transaction_uuid;
+                            $types_update .= "s";
+
                             $update_stmt = $conn->prepare($sql_update);
                             $update_stmt->bind_param($types_update, ...$params_update);
                             $update_stmt->execute();
                         }
+
                         $conn->commit();
                         send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
                         header("Location: " . $_SERVER['REQUEST_URI']);
                         exit;
+
                     } catch (Exception $e) {
                         $conn->rollback();
                         error_log("Error al actualizar estado: " . $e->getMessage());
@@ -150,7 +219,8 @@ if (!empty($transaction_uuid)) {
                     }
                 }
             }
-             if (isset($_POST['submit_rating']) && $current_status === 'released') {
+
+            if (isset($_POST['submit_rating']) && $current_status === 'released') {
                 $rating = filter_var($_POST['rating'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 5]]);
                 $comment = trim($_POST['comment']);
                 if ($rating) {
@@ -223,37 +293,40 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                         </div>
                     <?php endif; ?>
                     </div>
-                    <div class="lg:col-span-3"><div class="card p-6 md:p-8 sticky top-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2><div class="text-center"><p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo htmlspecialchars($user_role); ?></span></p><?php if (!$is_finished && $current_status !== 'dispute'): ?><?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?><div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b"><h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura.</p><form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors"><i class="fas fa-wallet mr-2"></i>Pagar con Wompi</button></form></div><?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div><?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
-                    <?php elseif ($current_status === 'received'): ?>
-                        <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b">
-                            <h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3>
-                            <?php if ($user_role === 'Vendedor'): ?>
-                                <p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente cuando finalice el tiempo.</p>
-                            <?php elseif ($user_role === 'Comprador'): ?>
-                                <p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p>
-                                <form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4">
-                                    <input type="hidden" name="new_status" value="released">
-                                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button>
-                                </form>
-                                <a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center">
-                                    <i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema
-                                </a>
-                            <?php endif; ?>
-                            <?php if (!empty($transaction['release_funds_at'])): ?>
-                                <div class="mt-4">
-                                    <p class="text-xs text-slate-500">Tiempo restante:</p>
-                                    <?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?>
-                                    <div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div>
-                                    <div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 0%"></div></div>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php else: ?><p class="text-slate-500 italic py-6">Esperando a la otra parte.</p><?php endif; ?>
-                    <?php elseif($current_status === 'dispute'): ?>
-                        <div class="p-4 bg-red-50 border-t-4 border-red-400 rounded-b">
-                            <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
-                            <p class="text-sm text-slate-600 mt-2">La transacción está pausada. Usa el chat para comunicarte o espera la intervención de un administrador.</p>
-                        </div>
+                    <div class="lg:col-span-3"><div class="card p-6 md:p-8 sticky top-8"><h2 class="text-2xl font-bold text-slate-800 mb-6">Panel de Acciones</h2><div class="text-center"><p class="mb-4 text-slate-600">Tu rol: <span class="font-bold text-slate-800"><?php echo htmlspecialchars($user_role); ?></span></p>
+                    <?php if (!$is_finished): ?>
+                        <?php if ($user_role === 'Comprador' && $current_status === 'initiated'): ?><div class="p-4 bg-slate-50 border-t-4 border-slate-200 rounded-b"><h3 class="font-bold text-lg text-slate-800">Acción Requerida</h3><p class="text-sm text-slate-600 mt-2 mb-6">Deposita los fondos de forma segura.</p><form action="https://checkout.wompi.co/p/" method="GET"><input type="hidden" name="public-key" value="<?php echo WOMPI_PUBLIC_KEY; ?>"><input type="hidden" name="currency" value="COP"><input type="hidden" name="amount-in-cents" value="<?php echo $amount_in_cents; ?>"><input type="hidden" name="reference" value="<?php echo $transaction_uuid; ?>"><input type="hidden" name="signature:integrity" value="<?php echo $wompi_signature; ?>"><input type="hidden" name="redirect-url" value="<?php echo $redirect_url_wompi; ?>"><button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors"><i class="fas fa-wallet mr-2"></i>Pagar con Wompi</button></form></div>
+                        <?php elseif ($user_role === 'Vendedor' && $current_status === 'funded'): ?><div class="p-4 bg-blue-50 border-t-4 border-blue-400 rounded-b space-y-4"><h3 class="font-bold text-lg text-gray-800">Gestionar Entrega</h3><div><h4 class="font-semibold text-gray-700">Sello de Entrega QR</h4><?php if (is_null($transaction['qr_code_token'])): ?><p class="text-xs text-gray-600 mt-1 mb-3">Genera el sello para confirmar la entrega.</p><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="generate_qr" value="1"><button type="submit" class="w-full bg-slate-700 text-white font-bold py-2 px-4 rounded-lg text-sm"><i class="fas fa-qrcode mr-2"></i>Generar Sello QR</button></form><?php else: ?><p class="text-xs text-gray-600 mt-1 mb-3">Sello generado. Imprímelo e inclúyelo en el paquete.</p><div class="p-2 bg-white border rounded-lg mb-2"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=<?php echo urlencode($transaction['qr_code_token']); ?>" alt="Sello QR" class="w-full h-auto mx-auto"></div><form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST"><input type="hidden" name="new_status" value="shipped"><button type="submit" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-truck mr-2"></i>Marcar como Enviado</button></form><?php endif; ?></div></div>
+                        <?php elseif ($user_role === 'Comprador' && $current_status === 'shipped'): ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-gray-800">Acción Requerida</h3><p class="text-sm text-gray-600 mt-2 mb-4">Confirma que recibiste el producto para iniciar el período de garantía.</p><button id="scan-qr-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg"><i class="fas fa-camera mr-2"></i>Escanear Sello de Entrega</button><div id="qr-scanner-container" class="hidden mt-4"><div id="qr-reader" class="w-full"></div><button id="stop-scan-btn" class="mt-2 w-full text-xs text-white bg-red-600/80 py-1 rounded-md">Cancelar</button></div><div id="scan-result" class="mt-4 text-sm font-semibold"></div><p class="text-xs text-gray-500 mt-4">¿Problemas? <button id="manual-confirm-btn" class="underline">Confirmar recepción manualmente</button>.</p><form id="confirm-reception-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="hidden"><input type="hidden" name="new_status" value="received"></form></div>
+                        <?php elseif ($current_status === 'received'): ?>
+                            <div class="p-4 bg-yellow-50 border-t-4 border-yellow-400 rounded-b"><h3 class="font-bold text-lg text-slate-800">Periodo de Garantía Activo</h3><?php if ($user_role === 'Vendedor'): ?><p class="text-sm text-slate-600 mt-2 mb-4">El comprador está inspeccionando el producto. Los fondos se liberarán automáticamente.</p><?php elseif ($user_role === 'Comprador'): ?><p class="text-sm text-slate-600 mt-2 mb-2">Inspecciona el producto y confirma que todo esté en orden.</p><form id="release-funds-form" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4"><input type="hidden" name="new_status" value="released"><button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Todo OK, Liberar Fondos</button></form><a href="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="block w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-red-700 text-center"><i class="fas fa-exclamation-triangle mr-2"></i>Tengo un Problema</a><?php endif; ?><?php if (!empty($transaction['release_funds_at'])): ?><div class="mt-4"><p class="text-xs text-slate-500">Tiempo restante:</p><?php $inspection_period_minutes = (defined('INSPECTION_PERIOD_MINUTES') && INSPECTION_PERIOD_MINUTES > 0) ? INSPECTION_PERIOD_MINUTES : 10; ?><div id="countdown-timer" class="text-2xl font-bold text-slate-700" data-release-time="<?php echo strtotime($transaction['release_funds_at']) * 1000; ?>" data-total-duration="<?php echo $inspection_period_minutes * 60; ?>">--:--</div><div class="w-full bg-slate-200 rounded-full h-2.5 mt-1"><div id="progress-bar" class="bg-yellow-500 h-2.5 rounded-full" style="width: 0%"></div></div></div><?php endif; ?></div>
+                        <?php elseif($current_status === 'dispute'): ?>
+                            <div class="p-4 bg-red-50 border-t-4 border-red-400 rounded-b">
+                                <h3 class="font-bold text-lg text-red-800"><i class="fas fa-exclamation-triangle mr-2"></i>Transacción en Disputa</h3>
+                                <?php if ($user_role === 'Comprador'): ?>
+                                    <p class="text-sm text-slate-600 mt-2 mb-4">Puedes resolver la disputa si llegas a un acuerdo con el vendedor.</p>
+                                     <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-4">
+                                        <input type="hidden" name="new_status" value="released">
+                                        <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-green-700 mb-2"><i class="fas fa-check-circle mr-2"></i>Acuerdo alcanzado, Liberar Fondos</button>
+                                    </form>
+                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" class="mt-2">
+                                        <input type="hidden" name="new_status" value="received">
+                                        <button type="submit" class="w-full bg-yellow-500 text-yellow-800 font-bold py-2 px-4 rounded-lg text-sm hover:bg-yellow-600"><i class="fas fa-undo mr-2"></i>Cancelar Disputa y Reanudar Garantía</button>
+                                    </form>
+                                <?php elseif ($user_role === 'Vendedor'): ?>
+                                    <p class="text-sm text-slate-600 mt-2 mb-4">El comprador ha iniciado una disputa. Puedes resolverla a través del chat o reembolsar el pago para cancelar la transacción.</p>
+                                    <form action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>" method="POST" onsubmit="return confirm('¿Estás seguro de que quieres reembolsar el monto al comprador? Esta acción cancelará la transacción.');">
+                                        <input type="hidden" name="seller_refund" value="1">
+                                        <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-blue-700">
+                                            <i class="fas fa-undo-alt mr-2"></i>Reembolsar al Comprador
+                                        </button>
+                                    </form>
+                                    <p class="text-xs text-slate-500 mt-2">Nota: Las comisiones de la plataforma no son reembolsables.</p>
+                                <?php else: ?>
+                                    <p class="text-sm text-slate-600 mt-2">La transacción está pausada. Espera a que las partes resuelvan la disputa.</p>
+                                <?php endif; ?>
+                            </div>
+                        <?php else: ?><p class="text-slate-500 italic py-6">Esperando a la otra parte.</p><?php endif; ?>
                     <?php else: ?><div class="p-4 bg-green-50 border-t-4 border-green-400 rounded-b"><h3 class="font-bold text-lg text-green-800"><i class="fas fa-check-circle mr-2"></i>Transacción Finalizada</h3></div><?php endif; ?></div></div></div>
                 </div>
             </div>
@@ -274,6 +347,11 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
                     const lastMessageId = chatBox.dataset.lastMessageId || 0;
                     const currentStatus = document.getElementById('transaction-id').dataset.status;
 
+                    if (currentStatus === 'released' || currentStatus === 'cancelled') {
+                        if(pollingInterval) clearInterval(pollingInterval);
+                        return;
+                    }
+
                     const response = await fetch(`get_transaction_updates.php?tx_uuid=${transactionUUID}&last_message_id=${lastMessageId}&current_status=${currentStatus}`);
                     if (!response.ok) return;
 
@@ -281,7 +359,6 @@ function get_line_class($s, $c) { $st=['initiated','funded','shipped','received'
 
                     if (data.error) {
                         console.error('Error del servidor:', data.error);
-                        // Detener el polling si hay un error para no sobrecargar
                         if(pollingInterval) clearInterval(pollingInterval);
                         return;
                     }
