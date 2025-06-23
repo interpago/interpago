@@ -5,7 +5,8 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 session_start();
-if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+// CORRECCIÓN: Usar la variable de sesión de admin
+if (!isset($_SESSION['admin_loggedin']) || $_SESSION['admin_loggedin'] !== true) {
     header("Location: login.php");
     exit;
 }
@@ -25,29 +26,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resolve_dispute'])) {
 
     $conn->begin_transaction();
     try {
-        // Obtener datos de la transacción
         $tx_stmt = $conn->prepare("SELECT * FROM transactions WHERE id = ? AND status = 'dispute' FOR UPDATE");
         $tx_stmt->bind_param("i", $transaction_id);
         $tx_stmt->execute();
         $tx = $tx_stmt->get_result()->fetch_assoc();
 
         if ($tx) {
-            // Si la resolución es liberar los fondos al vendedor
             if ($final_status === 'released') {
                 $balance_stmt = $conn->prepare("UPDATE users SET balance = balance + ? WHERE id = ?");
                 $balance_stmt->bind_param("di", $tx['net_amount'], $tx['seller_id']);
                 $balance_stmt->execute();
             }
-            // Si la resolución es cancelar, el dinero nunca se movió, solo se actualiza el estado.
 
-            // Actualizar la transacción con la resolución
             $update_stmt = $conn->prepare("UPDATE transactions SET status = ?, dispute_resolution = ? WHERE id = ?");
             $update_stmt->bind_param("ssi", $final_status, $resolution_comment, $transaction_id);
             $update_stmt->execute();
 
             $conn->commit();
 
-            // Notificar a ambas partes sobre la resolución
             send_notification($conn, "dispute_resolved", ['transaction_uuid' => $tx['transaction_uuid'], 'resolution' => $resolution_comment]);
 
         } else {
@@ -79,22 +75,7 @@ $result = $conn->query("SELECT * FROM transactions WHERE status = 'dispute' ORDE
 </head>
 <body class="bg-gray-100">
     <div class="flex">
-        <!-- Barra lateral -->
-        <aside class="w-64 bg-slate-800 text-white min-h-screen p-4 flex-shrink-0 flex flex-col">
-            <div class="text-center mb-10"><a href="index.php" class="flex items-center justify-center space-x-2"><i class="fas fa-shield-alt text-3xl"></i><h1 class="text-2xl font-bold">Admin Interpago</h1></a></div>
-            <nav class="flex-grow">
-                <ul class="space-y-2">
-                    <li><a href="index.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-tachometer-alt w-6"></i><span class="ml-3">Dashboard</span></a></li>
-                    <li><a href="transactions.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-list-ul w-6"></i><span class="ml-3">Transacciones</span></a></li>
-                    <li><a href="withdrawals.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-hand-holding-usd w-6"></i><span class="ml-3">Retiros</span></a></li>
-                    <li><a href="verifications.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-user-check w-6"></i><span class="ml-3">Verificaciones</span></a></li>
-                    <li><a href="disputes.php" class="flex items-center p-3 rounded-lg bg-slate-900"><i class="fas fa-gavel w-6"></i><span class="ml-3">Disputas</span></a></li>
-                </ul>
-            </nav>
-            <div><a href="logout.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-sign-out-alt w-6"></i><span class="ml-3">Cerrar Sesión</span></a></div>
-        </aside>
-
-        <!-- Contenido Principal -->
+        <?php require_once __DIR__ . '/includes/sidebar.php'; // Cargar el menú lateral unificado ?>
         <main class="flex-1 p-6 md:p-10 overflow-y-auto">
             <header class="mb-8">
                 <h1 class="text-3xl font-bold text-slate-900">Gestión de Disputas</h1>

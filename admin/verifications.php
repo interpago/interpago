@@ -1,50 +1,18 @@
 <?php
 // admin/verifications.php
-
-// Muestra todos los errores para facilitar la depuración.
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
-
 session_start();
-if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
+// CORRECCIÓN: Usar la variable de sesión específica para el admin
+if (!isset($_SESSION['admin_loggedin']) || $_SESSION['admin_loggedin'] !== true) {
     header("Location: login.php");
     exit;
 }
-
-// Se usan rutas absolutas para mayor fiabilidad.
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../send_notification.php';
-
-// **LÓGICA CORREGIDA: Procesar la acción de aprobar o rechazar**
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_id']) && isset($_POST['action'])) {
-    $user_id_to_update = $_POST['user_id'];
-    $action = $_POST['action'];
-    $new_status = '';
-
-    if ($action === 'approve') {
-        $new_status = 'verified';
-    } elseif ($action === 'reject') {
-        $new_status = 'unverified'; // O podrías tener un estado 'rejected' para notificar al usuario
-    }
-
-    if (!empty($new_status)) {
-        $stmt = $conn->prepare("UPDATE users SET verification_status = ? WHERE id = ?");
-        $stmt->bind_param("si", $new_status, $user_id_to_update);
-        $stmt->execute();
-        $stmt->close();
-    }
-
-    header("Location: verifications.php");
-    exit;
-}
-
-// Obtener todos los usuarios con estado de verificación 'pending'
-$result = $conn->query("
-    SELECT id, name, email, document_type, document_number, document_image_path
-    FROM users
-    WHERE verification_status = 'pending'
-    ORDER BY created_at ASC
-");
+// ... (toda tu lógica de POST para aprobar/rechazar verificaciones permanece igual) ...
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_id']) && isset($_POST['action'])) { $user_id_to_update = $_POST['user_id']; $action = $_POST['action']; $new_status = ''; if ($action === 'approve') { $new_status = 'verified'; } elseif ($action === 'reject') { $new_status = 'unverified'; } if (!empty($new_status)) { $stmt = $conn->prepare("UPDATE users SET verification_status = ? WHERE id = ?"); $stmt->bind_param("si", $new_status, $user_id_to_update); $stmt->execute(); $stmt->close(); } header("Location: verifications.php"); exit; }
+$result = $conn->query("SELECT id, name, email, document_type, document_number, document_image_path FROM users WHERE verification_status = 'pending' ORDER BY created_at ASC");
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -59,74 +27,30 @@ $result = $conn->query("
 </head>
 <body class="bg-slate-100">
     <div class="flex">
-        <!-- Barra lateral -->
-        <aside class="w-64 bg-slate-800 text-white min-h-screen p-4 flex-shrink-0 flex flex-col">
-            <div class="text-center mb-10">
-                <a href="index.php" class="flex items-center justify-center space-x-2">
-                    <i class="fas fa-shield-alt text-3xl"></i>
-                    <h1 class="text-2xl font-bold">Admin Interpago</h1>
-                </a>
-            </div>
-            <nav class="flex-grow">
-                <ul class="space-y-2">
-                    <li><a href="index.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-tachometer-alt w-6"></i><span class="ml-3">Dashboard</span></a></li>
-                    <li><a href="transactions.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-list-ul w-6"></i><span class="ml-3">Transacciones</span></a></li>
-                    <li><a href="withdrawals.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-hand-holding-usd w-6"></i><span class="ml-3">Retiros</span></a></li>
-                    <li><a href="verifications.php" class="flex items-center p-3 rounded-lg bg-slate-900"><i class="fas fa-user-check w-6"></i><span class="ml-3">Verificaciones</span></a></li>
-                    <li><a href="disputes.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-gavel w-6"></i><span class="ml-3">Disputas</span></a></li>
-                </ul>
-            </nav>
-            <div><a href="logout.php" class="flex items-center p-3 rounded-lg hover:bg-slate-700"><i class="fas fa-sign-out-alt w-6"></i><span class="ml-3">Cerrar Sesión</span></a></div>
-        </aside>
-
-        <!-- Contenido Principal -->
+        <?php require_once __DIR__ . '/includes/sidebar.php'; // Cargar el menú lateral unificado ?>
         <main class="flex-1 p-6 md:p-10 overflow-y-auto">
             <header class="mb-8">
                 <h1 class="text-3xl font-bold text-slate-900">Verificaciones de Identidad Pendientes</h1>
                 <p class="text-slate-600">Revisa y aprueba los documentos de los nuevos usuarios.</p>
             </header>
-
+            <!-- ... (el resto de tu HTML para la tabla de verificaciones) ... -->
             <div class="bg-white rounded-2xl shadow-lg overflow-x-auto">
                 <table class="w-full text-sm text-left text-slate-500">
                     <thead class="text-xs text-slate-700 uppercase bg-slate-50">
-                        <tr>
-                            <th class="px-6 py-3">Usuario</th>
-                            <th class="px-6 py-3">Documento</th>
-                            <th class="px-6 py-3">Imagen del Documento</th>
-                            <th class="px-6 py-3">Acciones</th>
-                        </tr>
+                        <tr><th class="px-6 py-3">Usuario</th><th class="px-6 py-3">Documento</th><th class="px-6 py-3">Imagen del Documento</th><th class="px-6 py-3">Acciones</th></tr>
                     </thead>
                     <tbody>
-                        <?php if ($result && $result->num_rows > 0): ?>
-                            <?php while($row = $result->fetch_assoc()): ?>
-                                <tr class="bg-white border-b hover:bg-slate-50">
-                                    <td class="px-6 py-4">
-                                        <p class="font-medium text-slate-900"><?php echo htmlspecialchars($row['name']); ?></p>
-                                        <p class="text-xs text-slate-500"><?php echo htmlspecialchars($row['email']); ?></p>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <p><?php echo htmlspecialchars($row['document_type']); ?>: <?php echo htmlspecialchars($row['document_number']); ?></p>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <?php if (!empty($row['document_image_path'])): ?>
-                                            <a href="../<?php echo htmlspecialchars($row['document_image_path']); ?>" target="_blank" class="text-blue-600 hover:underline">Ver Imagen</a>
-                                        <?php else: ?>
-                                            <span class="text-slate-400">No disponible</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td class="px-6 py-4 flex space-x-2">
-                                        <form action="verifications.php" method="POST">
-                                            <input type="hidden" name="user_id" value="<?php echo $row['id']; ?>">
-                                            <button type="submit" name="action" value="approve" class="text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-4 py-2">Aprobar</button>
-                                        </form>
-                                        <form action="verifications.php" method="POST">
-                                            <input type="hidden" name="user_id" value="<?php echo $row['id']; ?>">
-                                            <button type="submit" name="action" value="reject" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2">Rechazar</button>
-                                        </form>
-                                    </td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
+                        <?php if ($result && $result->num_rows > 0): while($row = $result->fetch_assoc()): ?>
+                            <tr class="bg-white border-b hover:bg-slate-50">
+                                <td class="px-6 py-4"><p class="font-medium text-slate-900"><?php echo htmlspecialchars($row['name']); ?></p><p class="text-xs text-slate-500"><?php echo htmlspecialchars($row['email']); ?></p></td>
+                                <td class="px-6 py-4"><p><?php echo htmlspecialchars($row['document_type']); ?>: <?php echo htmlspecialchars($row['document_number']); ?></p></td>
+                                <td class="px-6 py-4"><?php if (!empty($row['document_image_path'])): ?><a href="../<?php echo htmlspecialchars($row['document_image_path']); ?>" target="_blank" class="text-blue-600 hover:underline">Ver Imagen</a><?php else: ?><span class="text-slate-400">No disponible</span><?php endif; ?></td>
+                                <td class="px-6 py-4 flex space-x-2">
+                                    <form action="verifications.php" method="POST"><input type="hidden" name="user_id" value="<?php echo $row['id']; ?>"><button type="submit" name="action" value="approve" class="text-white bg-green-600 hover:bg-green-700 font-medium rounded-lg text-sm px-4 py-2">Aprobar</button></form>
+                                    <form action="verifications.php" method="POST"><input type="hidden" name="user_id" value="<?php echo $row['id']; ?>"><button type="submit" name="action" value="reject" class="text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2">Rechazar</button></form>
+                                </td>
+                            </tr>
+                        <?php endwhile; else: ?>
                             <tr><td colspan="4" class="text-center py-10 text-slate-500">No hay verificaciones pendientes en este momento.</td></tr>
                         <?php endif; ?>
                     </tbody>

@@ -3,23 +3,22 @@
 
 session_start();
 
-// --- INICIO DE CORRECCIÓN: Evitar caché en la página de login ---
-// Estas cabeceras le dicen al navegador que no guarde esta página en caché.
-// Así, si un usuario logueado presiona "atrás", el navegador recargará la página
-// y el código de abajo lo redirigirá correctamente al panel.
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-header('Expires: 0');
-// --- FIN DE CORRECCIÓN ---
+// Cargar configuración primero para tener acceso a APP_URL.
+require_once __DIR__ . '/../config.php';
 
+// Construir la URL absoluta para el panel de admin.
+$admin_dashboard_url = rtrim(APP_URL, '/') . '/admin/index.php';
 
-// Si el usuario ya está logueado, redirigirlo al dashboard.
-if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    header("Location: index.php");
+// Si el admin ya está logueado, redirigirlo a su panel de forma explícita.
+if (isset($_SESSION['admin_loggedin']) && $_SESSION['admin_loggedin'] === true) {
+    header("Location: " . $admin_dashboard_url);
     exit;
 }
 
-require_once __DIR__ . '/../config.php';
+// Evitar caché para prevenir problemas con el botón "atrás" del navegador.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 
 $error = '';
 
@@ -38,13 +37,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result->num_rows === 1) {
             $admin = $result->fetch_assoc();
             if (password_verify($password, $admin['password_hash'])) {
-                // CORRECCIÓN DE SEGURIDAD: Regenerar ID de sesión para prevenir secuestro de sesión
-                session_regenerate_id(true);
+                session_regenerate_id(true); // Medida de seguridad
 
-                $_SESSION['loggedin'] = true;
+                // Establecer variables de sesión específicas para el admin
+                $_SESSION['admin_loggedin'] = true;
                 $_SESSION['admin_id'] = $admin['id'];
                 $_SESSION['admin_username'] = $admin['username'];
-                header("Location: index.php");
+
+                // Redirigir usando la URL absoluta y segura
+                header("Location: " . $admin_dashboard_url);
                 exit;
             }
         }
