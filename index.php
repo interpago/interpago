@@ -209,6 +209,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <div class="hidden md:flex items-center space-x-4">
                         <?php if (isset($_SESSION['user_id'])): ?>
                             <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
+                            <a href="support.php" class="text-slate-600 font-medium hover:text-blue-600">Soporte</a> <!-- ENLACE AÑADIDO -->
                             <a href="edit_profile.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Perfil</a>
                             <a href="logout.php" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 text-sm">Cerrar Sesión</a>
                         <?php else: ?>
@@ -278,6 +279,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                  <ul class="space-y-4 text-lg">
                     <?php if (isset($_SESSION['user_id'])): ?>
                         <li><a href="dashboard.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Panel</a></li>
+                        <li><a href="support.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Soporte</a></li> <!-- ENLACE AÑADIDO -->
                         <li><a href="edit_profile.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Perfil</a></li>
                         <li><a href="logout.php" class="block p-2 rounded-md font-medium text-red-600 hover:bg-red-50">Cerrar Sesión</a></li>
                     <?php else: ?>
