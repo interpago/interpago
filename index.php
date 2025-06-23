@@ -147,8 +147,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             overflow: hidden;
             box-shadow: inset 0 -2px 5px rgba(0,0,0,0.2);
             padding: 4px 0;
-            border-top-left-radius: 1rem;
-            border-top-right-radius: 1rem;
         }
         .feed-track {
             position: absolute;
@@ -197,36 +195,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
     </style>
 </head>
 <body class="bg-slate-50">
-    <!-- Contenedor principal -->
     <div class="flex flex-col md:flex-row min-h-screen">
-
-        <!-- Columna de Información -->
         <div class="w-full md:w-1/2 bg-white p-8 md:p-12 flex flex-col">
-            <nav class="w-full hidden md:flex justify-between items-center">
-                <a href="index.php" class="flex items-center space-x-3 text-2xl font-bold text-slate-900">
-                    <svg class="h-8 w-8 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg>
-                    <span>Interpago</span>
-                </a>
-                <div class="flex items-center space-x-4">
-                    <?php if (isset($_SESSION['user_id'])): ?>
-                        <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
-                        <a href="edit_profile.php" class="text-slate-600 font-medium hover:text-blue-600">Centro de cuenta</a>
-                        <a href="logout.php" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 text-sm">Cerrar Sesión</a>
-                    <?php else: ?>
-                        <a href="login.php" class="text-slate-600 font-medium hover:text-blue-600">Iniciar Sesión</a>
-                        <a href="register.php" class="bg-slate-800 text-white font-bold py-2 px-4 rounded-lg hover:bg-slate-900 text-sm">Registrarse</a>
-                    <?php endif; ?>
+            <nav class="w-full">
+                <div class="flex justify-between items-center">
+                    <div class="text-2xl font-bold text-slate-900">
+                        <a href="index.php" class="flex items-center space-x-3">
+                            <svg class="h-8 w-8 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg>
+                            <span>Interpago</span>
+                        </a>
+                    </div>
+                    <div class="hidden md:flex items-center space-x-4">
+                        <?php if (isset($_SESSION['user_id'])): ?>
+                            <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
+                            <a href="edit_profile.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Perfil</a>
+                            <a href="logout.php" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 text-sm">Cerrar Sesión</a>
+                        <?php else: ?>
+                            <a href="login.php" class="text-slate-600 font-medium hover:text-blue-600">Iniciar Sesión</a>
+                            <a href="register.php" class="bg-slate-800 text-white font-bold py-2 px-4 rounded-lg hover:bg-slate-900 text-sm">Registrarse</a>
+                        <?php endif; ?>
+                    </div>
+                    <button id="mobile-menu-button" class="md:hidden p-2 text-slate-600"><i class="fas fa-bars text-2xl"></i></button>
                 </div>
             </nav>
-            <nav class="w-full md:hidden flex justify-between items-center">
-                 <a href="index.php" class="flex items-center space-x-3 text-2xl font-bold text-slate-900">
-                    <svg class="h-8 w-8 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg>
-                    <span>Interpago</span>
-                </a>
-                <button id="mobile-menu-button" class="p-2 text-slate-600"><i class="fas fa-bars text-2xl"></i></button>
-            </nav>
-
-            <div class="my-auto py-12 md:py-0">
+            <div class="py-12 md:my-auto">
                 <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight">Compra y Vende en Línea sin Riesgos.</h1>
                 <p class="mt-4 text-lg text-slate-600">Nuestra plataforma retiene el pago de forma segura hasta que ambas partes estén satisfechas, eliminando el fraude en el comercio online.</p>
                 <div class="mt-10 space-y-6">
@@ -235,45 +227,42 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
                 </div>
             </div>
-             <div class="mt-12 text-center border-t pt-8 hidden md:block">
+            <div class="mt-auto text-center border-t pt-8 hidden md:block">
                 <h3 class="font-semibold text-slate-500 uppercase tracking-wider text-sm">Aceptamos todos los métodos de pago</h3>
                 <div class="mt-4 flex justify-center items-center space-x-8 filter grayscale opacity-60">
                     <img src="assets/images/visa.svg" alt="Visa" class="h-8"><img src="assets/images/mastercard.svg" alt="Mastercard" class="h-8"><img src="assets/images/nequi.svg" alt="Nequi" class="h-8"><img src="assets/images/pse.svg" alt="PSE" class="h-7">
                 </div>
             </div>
         </div>
-        <div class="w-full md:w-1/2 flex flex-col">
-            <div class="w-full p-8 md:p-12 flex-1 flex items-center justify-center form-container relative">
-                <div class="absolute inset-0 bg-white/80 backdrop-blur-sm"></div>
-                <div class="w-full max-w-md relative">
-                    <!-- Animación Global -->
-                    <div class="live-feed-container mb-4">
-                        <div id="track-1" class="feed-track feed-track-1"></div>
-                        <div id="track-2" class="feed-track feed-track-2"></div>
+        <div class="w-full md:w-1/2 p-8 md:p-12 flex items-center justify-center form-container relative">
+            <div class="absolute inset-0 bg-white/80 backdrop-blur-sm"></div>
+            <div class="max-w-md w-full relative">
+                 <!-- Animación Global -->
+                <div class="live-feed-container rounded-t-2xl">
+                    <div id="track-1" class="feed-track feed-track-1"></div>
+                    <div id="track-2" class="feed-track feed-track-2"></div>
+                </div>
+                <div class="bg-white/90 p-8 rounded-b-2xl shadow-2xl w-full">
+                    <div class="text-center mb-6"><h2 class="text-2xl font-bold text-slate-900">Iniciar una Transacción Segura</h2>
+                        <?php if (!isset($_SESSION['user_id'])): ?><p class="mt-2 text-sm text-amber-800 bg-amber-100 p-3 rounded-lg">Debes <a href="login.php" class="font-bold underline text-slate-800">iniciar sesión</a> o <a href="register.php" class="font-bold underline text-slate-800">registrarte</a> para poder crear una transacción.</p><?php endif; ?>
                     </div>
-                    <div class="bg-white/90 p-8 rounded-2xl shadow-2xl">
-                        <div class="text-center mb-6"><h2 class="text-2xl font-bold text-slate-900">Iniciar una Transacción Segura</h2>
-                            <?php if (!isset($_SESSION['user_id'])): ?><p class="mt-2 text-sm text-amber-800 bg-amber-100 p-3 rounded-lg">Debes <a href="login.php" class="font-bold underline text-slate-800">iniciar sesión</a> o <a href="register.php" class="font-bold underline text-slate-800">registrarte</a>.</p><?php endif; ?>
+                    <?php if (!empty($message)): ?><div class="p-4 mb-4 text-sm rounded-lg <?php echo $message_type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>"><?php echo $message; ?></div><?php endif; ?>
+                    <form id="create-transaction-form" action="index.php" method="POST" class="<?php echo !isset($_SESSION['user_id']) ? 'opacity-50 pointer-events-none' : ''; ?>">
+                        <input type="hidden" name="create_transaction" value="1">
+                        <div class="space-y-4">
+                            <div><label class="block text-sm font-medium text-slate-700 mb-1">Tu Rol</label><select name="role" class="w-full p-3 border border-slate-300 rounded-lg" required><option value="buyer">Soy el Comprador</option><option value="seller">Soy el Vendedor</option></select></div>
+                            <div><label class="block text-sm font-medium text-slate-700 mb-1">Correo de la Contraparte</label><input name="counterparty_email" type="email" placeholder="email@ejemplo.com" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
+                            <div><label class="block text-sm font-medium text-slate-700 mb-1">Descripción del Producto</label><textarea name="product_description" placeholder="Ej: iPhone 14 Pro, 256GB" class="w-full p-3 border border-slate-300 rounded-lg" required></textarea></div>
+                            <div><label class="block text-sm font-medium text-slate-700 mb-1">Monto del Acuerdo (COP)</label><input id="amount" name="amount" type="number" step="0.01" placeholder="Ej: 350000" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
+                            <div id="amount-error" class="text-red-600 text-xs mt-1 hidden"></div>
+                            <div><label class="block text-sm font-medium text-slate-700 mb-2">¿Quién asume la comisión?</label><div class="grid grid-cols-3 gap-2 rounded-lg bg-slate-200 p-1"><div><input type="radio" name="commission_payer" id="payer_seller" value="seller" class="hidden peer" checked><label for="payer_seller" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Vendedor</label></div><div><input type="radio" name="commission_payer" id="payer_buyer" value="buyer" class="hidden peer"><label for="payer_buyer" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Comprador</label></div><div><input type="radio" name="commission_payer" id="payer_split" value="split" class="hidden peer"><label for="payer_split" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Dividir 50/50</label></div></div></div>
+                            <div id="commission-breakdown" class="p-3 bg-slate-100 rounded-lg space-y-1 hidden"></div>
+                            <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
                         </div>
-                        <?php if (!empty($message)): ?><div class="p-4 mb-4 text-sm rounded-lg <?php echo $message_type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>"><?php echo $message; ?></div><?php endif; ?>
-                        <form action="index.php" method="POST" class="<?php echo !isset($_SESSION['user_id']) ? 'opacity-50 pointer-events-none' : ''; ?>">
-                            <input type="hidden" name="create_transaction" value="1">
-                            <div class="space-y-4">
-                                <div><label class="block text-sm font-medium text-slate-700 mb-1">Tu Rol</label><select name="role" class="w-full p-3 border border-slate-300 rounded-lg" required><option value="buyer">Soy el Comprador</option><option value="seller">Soy el Vendedor</option></select></div>
-                                <div><label class="block text-sm font-medium text-slate-700 mb-1">Correo de la Contraparte</label><input name="counterparty_email" type="email" placeholder="email@ejemplo.com" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
-                                <div><label class="block text-sm font-medium text-slate-700 mb-1">Descripción del Producto</label><textarea name="product_description" placeholder="Ej: iPhone 14 Pro, 256GB" class="w-full p-3 border border-slate-300 rounded-lg" required></textarea></div>
-                                <div><label class="block text-sm font-medium text-slate-700 mb-1">Monto del Acuerdo (COP)</label><input id="amount" name="amount" type="number" step="0.01" placeholder="Ej: 350000" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
-                                <div id="amount-error" class="text-red-600 text-xs mt-1 hidden"></div>
-                                <div><label class="block text-sm font-medium text-slate-700 mb-2">¿Quién asume la comisión?</label><div class="grid grid-cols-3 gap-2 rounded-lg bg-slate-200 p-1"><div><input type="radio" name="commission_payer" id="payer_seller" value="seller" class="hidden peer" checked><label for="payer_seller" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Vendedor</label></div><div><input type="radio" name="commission_payer" id="payer_buyer" value="buyer" class="hidden peer"><label for="payer_buyer" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Comprador</label></div><div><input type="radio" name="commission_payer" id="payer_split" value="split" class="hidden peer"><label for="payer_split" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Dividir 50/50</label></div></div></div>
-                                <div id="commission-breakdown" class="p-3 bg-slate-100 rounded-lg space-y-1 hidden"></div>
-                                <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
-                            </div>
-                        </form>
-                    </div>
+                    </form>
                 </div>
             </div>
         </div>
-        <!-- Footer para Móvil -->
         <div class="w-full p-8 text-center border-t md:hidden">
             <h3 class="font-semibold text-slate-500 uppercase tracking-wider text-sm">Aceptamos todos los métodos de pago</h3>
             <div class="mt-4 flex justify-center items-center space-x-8 filter grayscale opacity-60">
@@ -281,7 +270,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             </div>
         </div>
     </div>
-     <!-- Menú Móvil (Overlay) -->
     <div id="mobile-menu" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
         <div class="fixed top-0 right-0 h-full w-64 bg-white shadow-lg p-6">
             <button id="close-menu-button" class="absolute top-4 right-4 p-2 text-slate-600"><i class="fas fa-times text-2xl"></i></button>
@@ -289,7 +277,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                  <ul class="space-y-4 text-lg">
                     <?php if (isset($_SESSION['user_id'])): ?>
                         <li><a href="dashboard.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Panel</a></li>
-                        <li><a href="edit_profile.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Centro de cuenta</a></li>
+                        <li><a href="edit_profile.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Perfil</a></li>
                         <li><a href="logout.php" class="block p-2 rounded-md font-medium text-red-600 hover:bg-red-50">Cerrar Sesión</a></li>
                     <?php else: ?>
                         <li><a href="login.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Iniciar Sesión</a></li>
@@ -301,6 +289,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            // Manejo del menú móvil
             const mobileMenuButton = document.getElementById('mobile-menu-button');
             const closeMenuButton = document.getElementById('close-menu-button');
             const mobileMenu = document.getElementById('mobile-menu');
@@ -310,13 +299,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     if (mobileMenu) mobileMenu.classList.remove('hidden');
                 });
             }
-
             if(closeMenuButton) {
                 closeMenuButton.addEventListener('click', function() {
                     if (mobileMenu) mobileMenu.classList.add('hidden');
                 });
             }
-
             if(mobileMenu){
                 mobileMenu.addEventListener('click', function(event) {
                     if (event.target === mobileMenu) {
@@ -325,68 +312,71 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 });
             }
 
+            // Lógica para el desglose de comisiones del formulario
             const amountInput = document.getElementById('amount');
-            if (!amountInput) return;
-            const commissionBreakdown = document.getElementById('commission-breakdown');
-            const commissionPayers = document.querySelectorAll('input[name="commission_payer"]');
-            const submitButton = document.getElementById('submit-button');
-            const amountErrorEl = document.getElementById('amount-error');
-            const serviceFeePercent = <?php echo SERVICE_FEE_PERCENTAGE; ?>;
-            const gatewayPercent = <?php echo GATEWAY_PERCENTAGE_COST; ?>;
-            const gatewayFixed = <?php echo GATEWAY_FIXED_COST; ?>;
-            const minTransactionAmount = <?php echo defined('MINIMUM_TRANSACTION_AMOUNT') ? MINIMUM_TRANSACTION_AMOUNT : 0; ?>;
+            if (amountInput) {
+                const commissionBreakdown = document.getElementById('commission-breakdown');
+                const commissionPayers = document.querySelectorAll('input[name="commission_payer"]');
+                const submitButton = document.getElementById('submit-button');
+                const amountErrorEl = document.getElementById('amount-error');
+                const serviceFeePercent = <?php echo SERVICE_FEE_PERCENTAGE; ?>;
+                const gatewayPercent = <?php echo GATEWAY_PERCENTAGE_COST; ?>;
+                const gatewayFixed = <?php echo GATEWAY_FIXED_COST; ?>;
+                const minTransactionAmount = <?php echo defined('MINIMUM_TRANSACTION_AMOUNT') ? MINIMUM_TRANSACTION_AMOUNT : 0; ?>;
 
-            function calculateAndShowFees() {
-                const amount = parseFloat(amountInput.value);
-                const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+                function calculateAndShowFees() {
+                    const amount = parseFloat(amountInput.value);
+                    const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
 
-                if (amount > 0 && amount < minTransactionAmount) {
-                    amountErrorEl.textContent = `El monto mínimo es de ${formatter.format(minTransactionAmount)}.`;
-                    amountErrorEl.classList.remove('hidden');
-                    submitButton.disabled = true;
-                    return;
-                } else {
-                    amountErrorEl.classList.add('hidden');
-                    if (document.querySelector('form').classList.contains('opacity-50') === false) {
-                        submitButton.disabled = false;
+                    if (amount > 0 && amount < minTransactionAmount) {
+                        amountErrorEl.textContent = `El monto mínimo es de ${formatter.format(minTransactionAmount)}.`;
+                        amountErrorEl.classList.remove('hidden');
+                        submitButton.disabled = true;
+                        commissionBreakdown.classList.add('hidden');
+                        return;
+                    } else {
+                        amountErrorEl.classList.add('hidden');
+                        if (document.getElementById('create-transaction-form').classList.contains('opacity-50') === false) {
+                            submitButton.disabled = false;
+                        }
                     }
+
+                    if (isNaN(amount) || amount <= 0) {
+                        commissionBreakdown.classList.add('hidden');
+                        return;
+                    }
+
+                    const payer = document.querySelector('input[name="commission_payer"]:checked').value;
+                    const ourFee = amount * serviceFeePercent;
+                    const gatewayCost = (amount * gatewayPercent) + gatewayFixed;
+                    const totalCommission = ourFee + gatewayCost;
+
+                    let sellerReceives = amount;
+                    let buyerPays = amount;
+                    if (payer === 'seller') { sellerReceives = amount - totalCommission; }
+                    else if (payer === 'buyer') { buyerPays = amount + totalCommission; }
+                    else if (payer === 'split') {
+                        const splitCommission = totalCommission / 2;
+                        sellerReceives = amount - splitCommission;
+                        buyerPays = amount + splitCommission;
+                    }
+
+                    commissionBreakdown.innerHTML = `
+                        <div class="flex justify-between text-xs"><span class="text-slate-600">Tarifa de Servicio Interpago:</span><span class="font-semibold">${formatter.format(ourFee)}</span></div>
+                        <div class="flex justify-between text-xs"><span class="text-slate-600">Costo de Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayCost)}</span></div>
+                        <hr class="my-1 border-slate-200">
+                        <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
+                        <hr class="my-1 border-dashed">
+                        <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
+                        <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comprador Paga:</span><span class="text-slate-800">${formatter.format(buyerPays)}</span></div>
+                    `;
+                    commissionBreakdown.classList.remove('hidden');
                 }
-
-                if (isNaN(amount) || amount <= 0) {
-                    commissionBreakdown.classList.add('hidden');
-                    return;
-                }
-
-                const payer = document.querySelector('input[name="commission_payer"]:checked').value;
-                const ourFee = amount * serviceFeePercent;
-                const gatewayCost = (amount * gatewayPercent) + gatewayFixed;
-                const totalCommission = ourFee + gatewayCost;
-
-                let sellerReceives = amount;
-                let buyerPays = amount;
-                if (payer === 'seller') { sellerReceives = amount - totalCommission; }
-                else if (payer === 'buyer') { buyerPays = amount + totalCommission; }
-                else if (payer === 'split') {
-                    const splitCommission = totalCommission / 2;
-                    sellerReceives = amount - splitCommission;
-                    buyerPays = amount + splitCommission;
-                }
-
-                commissionBreakdown.innerHTML = `
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Tarifa de Servicio Interpago:</span><span class="font-semibold">${formatter.format(ourFee)}</span></div>
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo de Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayCost)}</span></div>
-                    <hr class="my-1 border-slate-200">
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
-                    <hr class="my-1 border-dashed">
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comprador Paga:</span><span class="text-slate-800">${formatter.format(buyerPays)}</span></div>
-                `;
-                commissionBreakdown.classList.remove('hidden');
+                amountInput.addEventListener('input', calculateAndShowFees);
+                commissionPayers.forEach(radio => radio.addEventListener('change', calculateAndShowFees));
             }
-            amountInput.addEventListener('input', calculateAndShowFees);
-            commissionPayers.forEach(radio => radio.addEventListener('change', calculateAndShowFees));
 
-            // Animación Global de Transacciones
+            // --- Animación Global de Transacciones ---
             const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
             if(tracks[0] && tracks[1]) {
                 let allCities = [];
@@ -410,7 +400,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
                     trackStatus[availableTrackIndex] = false;
                     const track = tracks[availableTrackIndex];
-
                     const item = document.createElement('div');
                     item.className = 'feed-item';
 
@@ -434,15 +423,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 async function startLiveFeed() {
                     try {
                         const response = await fetch('get_realtime_data.php');
+                        if (!response.ok) {
+                           throw new Error(`HTTP error! status: ${response.status}`);
+                        }
                         const data = await response.json();
-                        if (data.cities && data.amounts) {
+                        if (data.cities && data.cities.length > 0 && data.amounts && data.amounts.length > 0) {
                             allCities = data.cities;
                             allAmounts = data.amounts;
 
-                            setInterval(createFeedItem, 2500);
+                            // Iniciar la animación
+                            createFeedItem();
+                            setTimeout(createFeedItem, 2000); // Empezar la segunda linea con un retraso
+                            setInterval(createFeedItem, 4000); // Crear nuevos items cada 4 segundos
+                        } else {
+                            console.log("No hay datos de ciudades o montos para mostrar en la animación.");
                         }
                     } catch (error) {
-                        console.error("Error al cargar datos para el live feed:", error);
+                        console.error("Error al cargar datos para la animación en vivo:", error);
                     }
                 }
                 startLiveFeed();
