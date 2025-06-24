@@ -1,72 +1,116 @@
 <?php
-// payment_response.php
+// Muestra todos los errores para facilitar la depuración.
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
-ini_set('display_errors', 1); error_reporting(E_ALL);
+// Cargar configuración de la base de datos y otras dependencias
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/send_notification.php';
+if (file_exists(__DIR__ . '/lib/send_notification.php')) {
+    require_once __DIR__ . '/lib/send_notification.php';
+}
+
 session_start();
 
+// --- 1. Obtener el ID de la transacción de Wompi desde la URL ---
 $wompi_tx_id = $_GET['id'] ?? null;
+$redirect_url = 'dashboard.php'; // URL por defecto si algo falla
 $message = '';
 $message_type = 'error';
-$redirect_url = 'index.php';
 
-if ($wompi_tx_id) {
-    // Verificar la transacción directamente con la API de Wompi
-    $ch = curl_init(WOMPI_API_URL . '/transactions/' . $wompi_tx_id);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . WOMPI_PRIVATE_KEY]]);
-    $response = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+if (!$wompi_tx_id) {
+    $_SESSION['error_message'] = 'No se recibió un ID de transacción para verificar.';
+    header("Location: " . $redirect_url);
+    exit;
+}
 
-    if ($http_code == 200) {
-        $transaction_data = json_decode($response, true)['data'];
-        $transaction_uuid = $transaction_data['reference'];
-        $redirect_url = 'transaction.php?tx_uuid=' . $transaction_uuid . '&user_id=' . ($_SESSION['user_uuid'] ?? '');
+// --- 2. Consultar la transacción directamente a la API de Wompi ---
+$curl_url = WOMPI_API_URL . '/transactions/' . $wompi_tx_id;
+$ch = curl_init($curl_url);
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . WOMPI_PRIVATE_KEY]
+]);
+$response_body = curl_exec($ch);
+$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
 
-        if ($transaction_data['status'] === 'APPROVED') {
-            $new_status = 'funded';
-            $stmt = $conn->prepare("UPDATE transactions SET status = ?, payment_reference = ? WHERE transaction_uuid = ? AND status = 'initiated'");
-            $stmt->bind_param("sss", $new_status, $wompi_tx_id, $transaction_uuid);
+if ($http_code !== 200) {
+    $_SESSION['error_message'] = 'No pudimos verificar el estado de tu pago con Wompi en este momento.';
+    $fallback_url = isset($_SESSION['last_tx_uuid']) ? 'transaction.php?tx_uuid=' . $_SESSION['last_tx_uuid'] : $redirect_url;
+    header("Location: " . $fallback_url);
+    exit;
+}
 
-            if ($stmt->execute() && $stmt->affected_rows > 0) {
-                send_notification($conn, "payment_approved", ['transaction_uuid' => $transaction_uuid]);
-                $message = '¡Pago Aprobado! Tu transacción ha sido actualizada.';
-                $message_type = 'success';
+// --- 3. Procesar la respuesta de Wompi con lógica mejorada ---
+$wompi_data = json_decode($response_body, true);
+$transaction_data = $wompi_data['data'] ?? null;
+$transaction_uuid = $transaction_data['reference'] ?? null;
+$redirect_url = 'transaction.php?tx_uuid=' . $transaction_uuid;
+
+if ($transaction_data && $transaction_uuid) {
+    if ($transaction_data['status'] === 'APPROVED') {
+        try {
+            // Primero, verificamos el estado actual de la transacción en NUESTRA base de datos.
+            $stmt_check = $conn->prepare("SELECT status, seller_id FROM transactions WHERE transaction_uuid = ?");
+            $stmt_check->bind_param("s", $transaction_uuid);
+            $stmt_check->execute();
+            $current_tx = $stmt_check->get_result()->fetch_assoc();
+            $stmt_check->close();
+
+            if ($current_tx) {
+                if ($current_tx['status'] === 'initiated') {
+                    // El estado es el correcto, procedemos a actualizar.
+                    $conn->begin_transaction();
+                    $stmt_update = $conn->prepare("UPDATE transactions SET status = 'funded', payment_reference = ? WHERE transaction_uuid = ?");
+                    $stmt_update->bind_param("ss", $wompi_tx_id, $transaction_uuid);
+                    $stmt_update->execute();
+                    $stmt_update->close();
+                    $conn->commit();
+
+                    $message = '¡Pago Aprobado! Tu transacción ha sido actualizada y los fondos están en custodia.';
+                    $message_type = 'success';
+
+                    if(function_exists('send_notification')) {
+                        send_notification($conn, $current_tx['seller_id'], "payment_approved", ['transaction_uuid' => $transaction_uuid]);
+                    }
+
+                } elseif ($current_tx['status'] === 'funded') {
+                    // La transacción ya estaba fondeada. No hacemos nada.
+                    $message = 'Este pago ya había sido verificado anteriormente.';
+                    $message_type = 'info';
+                } else {
+                    // La transacción está en otro estado (cancelada, liberada, etc.)
+                    $message = 'El pago fue aprobado, pero la transacción se encuentra en un estado que no permite procesar el pago (' . htmlspecialchars($current_tx['status']) . ').';
+                    $message_type = 'error';
+                }
             } else {
-                $message = 'Pago verificado, pero la transacción ya había sido actualizada.';
-                $message_type = 'success';
+                $message = 'Error: No se encontró la transacción con la referencia proporcionada en nuestra base de datos.';
+                $message_type = 'error';
             }
-        } else {
-            $message = 'Tu pago fue ' . strtolower($transaction_data['status']) . '. Por favor, inténtalo de nuevo.';
+        } catch(Exception $e) {
+            if ($conn->in_transaction) {
+                $conn->rollback();
+            }
+            $message = 'Hubo un error crítico al actualizar la base de datos: ' . $e->getMessage();
+            $message_type = 'error';
         }
     } else {
-        $message = 'No pudimos verificar el estado de tu pago en este momento.';
+        // El pago fue RECHAZADO, ANULADO, etc.
+        $message = 'Tu pago fue ' . strtolower(htmlspecialchars($transaction_data['status'])) . '. Por favor, inténtalo de nuevo.';
+        $message_type = 'error';
     }
 } else {
-    $message = 'No se recibió un ID de transacción para verificar.';
+    $message = 'La respuesta de Wompi no pudo ser procesada.';
+    $message_type = 'error';
 }
+
+// Guardamos los mensajes en la sesión para mostrarlos en la página de la transacción
+if ($message_type === 'success') $_SESSION['success_message'] = $message;
+elseif ($message_type === 'info') $_SESSION['info_message'] = $message;
+else $_SESSION['error_message'] = $message;
+
+// --- 4. Redirigir al usuario de vuelta a la página de la transacción ---
+header("Location: " . $redirect_url);
+exit;
+
 ?>
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Respuesta de Pago - Interpago</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style> body { font-family: 'Inter', sans-serif; } </style>
-</head>
-<body class="bg-slate-100 flex items-center justify-center min-h-screen">
-    <div class="text-center p-8 bg-white rounded-2xl shadow-lg max-w-md">
-        <?php if ($message_type === 'success'): ?>
-            <i class="fas fa-check-circle text-6xl text-green-500 mb-4"></i>
-        <?php else: ?>
-            <i class="fas fa-times-circle text-6xl text-red-500 mb-4"></i>
-        <?php endif; ?>
-        <h1 class="text-2xl font-bold text-slate-800"><?php echo ($message_type === 'success') ? '¡Gracias!' : 'Hubo un Problema'; ?></h1>
-        <p class="text-slate-600 mt-2 mb-6"><?php echo htmlspecialchars($message); ?></p>
-        <a href="<?php echo htmlspecialchars($redirect_url); ?>" class="bg-slate-800 text-white font-bold py-3 px-6 rounded-lg hover:bg-slate-900">Volver a la Transacción</a>
-    </div>
-</body>
-</html>
