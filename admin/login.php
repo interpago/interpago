@@ -3,15 +3,15 @@
 
 session_start();
 
-// Cargar configuración primero para tener acceso a APP_URL.
+// Cargar configuración primero para tener acceso a APP_URL y a la conexión DB.
 require_once __DIR__ . '/../config.php';
 
-// Construir la URL absoluta para el panel de admin.
-$admin_dashboard_url = rtrim(APP_URL, '/') . '/admin/index.php';
+// --- CAMBIO: Apuntar a la página del chat ---
+$admin_chat_url = rtrim(APP_URL, '/') . '/admin/chat.php';
 
-// Si el admin ya está logueado, redirigirlo a su panel de forma explícita.
-if (isset($_SESSION['admin_loggedin']) && $_SESSION['admin_loggedin'] === true) {
-    header("Location: " . $admin_dashboard_url);
+// Si el admin ya está logueado, redirigirlo a la página del chat.
+if (isset($_SESSION['is_admin']) && $_SESSION['is_admin'] === true) {
+    header("Location: " . $admin_chat_url);
     exit;
 }
 
@@ -39,13 +39,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (password_verify($password, $admin['password_hash'])) {
                 session_regenerate_id(true); // Medida de seguridad
 
-                // Establecer variables de sesión específicas para el admin
+                // Establecer variables de sesión UNIFICADAS
+                $_SESSION['user_id'] = $admin['id'];
+                $_SESSION['is_admin'] = true;
                 $_SESSION['admin_loggedin'] = true;
-                $_SESSION['admin_id'] = $admin['id'];
                 $_SESSION['admin_username'] = $admin['username'];
 
-                // Redirigir usando la URL absoluta y segura
-                header("Location: " . $admin_dashboard_url);
+                // --- CAMBIO: Redirigir directamente al chat ---
+                header("Location: " . $admin_chat_url);
                 exit;
             }
         }

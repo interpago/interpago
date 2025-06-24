@@ -1,59 +1,58 @@
 <?php
-// login.php
-
 session_start();
+
+// Cargar la configuración al principio para que las constantes estén disponibles.
+require_once 'config.php';
+
 // Si el usuario ya está logueado, redirigir al panel.
 if (isset($_SESSION['user_id'])) {
     header("Location: dashboard.php");
     exit;
 }
 
-require_once 'config.php';
 $error = '';
 
-// Procesar el formulario cuando se envía
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// Procesar el formulario de login con EMAIL
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_with_email'])) {
     $email = trim($_POST['email']);
     $password = $_POST['password'];
 
-    // Validaciones básicas
     if (empty($email) || empty($password)) {
         $error = 'Todos los campos son obligatorios.';
     } else {
-        // CORRECCIÓN: Seleccionar también el user_uuid
-        $stmt = $conn->prepare("SELECT id, user_uuid, name, password_hash FROM users WHERE email = ?");
+        // Seleccionar también el campo 'status' para la verificación.
+        $stmt = $conn->prepare("SELECT id, user_uuid, name, password_hash, status FROM users WHERE email = ?");
         $stmt->bind_param("s", $email);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($user = $result->fetch_assoc()) {
-            // Verificar si la contraseña coincide con el hash almacenado
             if (password_verify($password, $user['password_hash'])) {
+                // Verificar si la cuenta está suspendida
+                if ($user['status'] === 'suspended') {
+                    $error = 'Tu cuenta ha sido suspendida. Por favor, contacta a soporte.';
+                } else {
+                    // Si el usuario está activo, se procede con el inicio de sesión.
+                    session_regenerate_id(true);
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['user_uuid'] = $user['user_uuid'];
+                    $_SESSION['user_name'] = $user['name'];
+                    $_SESSION['is_admin'] = false;
 
-                // Regenerar el ID de la sesión para mayor seguridad
-                session_regenerate_id(true);
+                    $current_ip = $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN';
+                    $history_stmt = $conn->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?");
+                    $history_stmt->bind_param("si", $current_ip, $user['id']);
+                    $history_stmt->execute();
 
-                // CORRECCIÓN: Guardar TODOS los datos necesarios del usuario en la sesión
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['user_uuid'] = $user['user_uuid']; // ¡Línea clave que faltaba!
-                $_SESSION['user_name'] = $user['name'];
-
-                // Registrar el inicio de sesión en el historial
-                $current_ip = $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN';
-                $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'UNKNOWN';
-
-                $history_stmt = $conn->prepare("INSERT INTO login_history (user_id, ip_address, user_agent) VALUES (?, ?, ?)");
-                $history_stmt->bind_param("iss", $user['id'], $current_ip, $user_agent);
-                $history_stmt->execute();
-                $history_stmt->close();
-
-                // Redirigir al panel principal
-                header("Location: dashboard.php");
-                exit;
+                    header("Location: dashboard.php");
+                    exit;
+                }
             }
         }
-        // Mensaje de error genérico para no dar pistas a atacantes
-        $error = 'Correo o contraseña incorrectos.';
+
+        if (empty($error)) {
+            $error = 'Correo o contraseña incorrectos.';
+        }
     }
 }
 ?>
@@ -68,68 +67,217 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .login-bg {
-            background-image: url('https://images.unsplash.com/photo-1604964432806-254d07c11f32?ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&ixlib=rb-1.2.1&auto=format&fit=crop&w=1080&q=80');
-            background-size: cover;
-            background-position: center;
-        }
+        .tab-button.active { border-color: #334155; background-color: #334155; color: white; }
     </style>
 </head>
-<body class="bg-slate-50">
-    <div class="flex min-h-screen">
-        <!-- Columna de Formulario (Izquierda) -->
-        <div class="w-full md:w-1/2 flex items-center justify-center p-8">
-            <div class="max-w-md w-full">
-                <div class="text-left mb-8">
-                    <a href="index.php" class="text-slate-600 hover:text-slate-900 mb-4 block"><i class="fas fa-arrow-left mr-2"></i>Volver al Inicio</a>
-                    <h2 class="text-3xl font-bold text-slate-900">Bienvenido de Vuelta</h2>
-                    <p class="text-slate-600 mt-2">Accede a tu cuenta para gestionar tus transacciones.</p>
+<body class="bg-slate-100">
+    <div class="flex min-h-screen items-center justify-center p-4">
+        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl">
+            <div class="text-center mb-8">
+                <a href="index.php" class="inline-block mb-4">
+                     <svg class="h-12 w-12 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg>
+                </a>
+                <h2 class="text-3xl font-bold text-slate-900">Bienvenido</h2>
+                <p class="text-slate-600 mt-2">Elige tu método de acceso preferido.</p>
+            </div>
+
+            <?php if (!empty($error)): ?>
+                <div class="p-4 mb-4 text-sm bg-red-100 text-red-800 rounded-lg text-center" id="error-box-php">
+                    <?php echo $error; ?>
                 </div>
+            <?php endif; ?>
+            <div id="alert-box" class="p-4 mb-4 text-sm rounded-lg hidden"></div>
 
-                <?php if (!empty($error)): ?>
-                    <div class="p-4 mb-4 text-sm bg-red-100 text-red-800 rounded-lg text-center">
-                        <?php echo $error; ?>
-                    </div>
-                <?php endif; ?>
+            <div class="grid grid-cols-2 gap-2 rounded-lg bg-slate-200 p-1 mb-6">
+                <div><button id="tab-email" class="tab-button w-full text-center rounded-md p-2 text-sm font-medium active">Con Correo</button></div>
+                <div><button id="tab-otp" class="tab-button w-full text-center rounded-md p-2 text-sm font-medium">Con Celular</button></div>
+            </div>
 
+            <div id="content-email">
                 <form action="login.php" method="POST" class="space-y-6">
+                    <input type="hidden" name="login_with_email" value="1">
                     <div>
                         <label for="email" class="block mb-2 text-sm font-medium text-slate-700">Correo Electrónico</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 flex items-center pl-3"><i class="fas fa-envelope text-slate-400"></i></span>
-                            <input id="email" name="email" type="email" class="w-full p-3 pl-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500" required>
-                        </div>
+                        <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3"><i class="fas fa-envelope text-slate-400"></i></span><input id="email" name="email" type="email" class="w-full p-3 pl-10 border border-slate-300 rounded-lg" required></div>
                     </div>
                     <div>
-                        <div class="flex justify-between items-center mb-2">
-                             <label for="password" class="block text-sm font-medium text-slate-700">Contraseña</label>
-                             <a href="forgot_password.php" class="text-sm text-slate-600 hover:underline">¿Olvidaste tu contraseña?</a>
-                        </div>
-                         <div class="relative">
-                            <span class="absolute inset-y-0 left-0 flex items-center pl-3"><i class="fas fa-lock text-slate-400"></i></span>
-                            <input id="password" name="password" type="password" class="w-full p-3 pl-10 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500" required>
-                        </div>
+                        <div class="flex justify-between items-center mb-2"><label for="password" class="block text-sm font-medium text-slate-700">Contraseña</label><a href="forgot_password.php" class="text-sm text-slate-600 hover:underline">¿Olvidaste?</a></div>
+                        <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3"><i class="fas fa-lock text-slate-400"></i></span><input id="password" name="password" type="password" class="w-full p-3 pl-10 border border-slate-300 rounded-lg" required></div>
                     </div>
-                    <button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors">
-                        <i class="fas fa-sign-in-alt mr-2"></i>Entrar
-                    </button>
+                    <button type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900"><i class="fas fa-sign-in-alt mr-2"></i>Entrar</button>
                 </form>
-                 <p class="text-center text-sm text-slate-600 mt-6">¿Aún no tienes una cuenta? <a href="register.php" class="font-medium text-slate-800 hover:underline">Regístrate ahora</a>.</p>
             </div>
-        </div>
 
-        <!-- Columna de Branding (Derecha) -->
-        <div class="hidden md:flex md:w-1/2 login-bg relative">
-            <div class="absolute inset-0 bg-slate-900 bg-opacity-75"></div>
-            <div class="relative z-10 flex flex-col justify-center items-center text-white text-center p-12">
-                <svg class="h-16 w-16 mb-4" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor">
-                    <path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/>
-                    <path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/>
-                </svg>
-                <h1 class="text-4xl font-bold">Interpago</h1>
-                <p class="mt-4 text-lg text-slate-300">Compra y vende con la tranquilidad de que tu dinero está protegido hasta que el acuerdo se complete.</p>
+            <div id="content-otp" class="hidden">
+                <div id="phone-step">
+                    <div class="relative"><span class="absolute inset-y-0 left-0 flex items-center pl-3 font-semibold text-slate-500">+57</span><input id="phone-number" type="tel" placeholder="300 123 4567" class="w-full p-3 pl-12 border border-slate-300 rounded-lg"></div>
+                    <button id="send-otp-btn" class="mt-4 w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900"><i class="fas fa-mobile-alt mr-2"></i>Enviar código</button>
+                </div>
+                <div id="otp-step" class="hidden">
+                    <p class="text-center text-sm text-slate-600 mb-4">Ingresa el código de 6 dígitos enviado a <b id="phone-sent-to"></b>.</p>
+                    <input id="otp-code" type="text" placeholder="––––––" maxlength="6" class="w-full p-3 text-center tracking-[1em] font-bold text-2xl border rounded-lg">
+                    <button id="verify-otp-btn" class="mt-4 w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700"><i class="fas fa-check-circle mr-2"></i>Verificar y Entrar</button>
+                </div>
             </div>
+
+            <div id="recaptcha-container" class="mt-4"></div>
+            <p class="text-center text-sm text-slate-600 mt-6">¿Aún no tienes una cuenta? <a href="register.php" class="font-medium text-slate-800 hover:underline">Regístrate ahora</a>.</p>
         </div>
     </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "<?php echo FIREBASE_API_KEY; ?>",
+            authDomain: "<?php echo FIREBASE_AUTH_DOMAIN; ?>",
+            projectId: "<?php echo FIREBASE_PROJECT_ID; ?>",
+            storageBucket: "<?php echo FIREBASE_STORAGE_BUCKET; ?>",
+            messagingSenderId: "<?php echo FIREBASE_MESSAGING_SENDER_ID; ?>",
+            appId: "<?php echo FIREBASE_APP_ID; ?>"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+
+        const tabEmail = document.getElementById('tab-email');
+        const tabOtp = document.getElementById('tab-otp');
+        const contentEmail = document.getElementById('content-email');
+        const contentOtp = document.getElementById('content-otp');
+        const errorBoxPhp = document.getElementById('error-box-php');
+        const alertBox = document.getElementById('alert-box');
+
+        tabEmail.addEventListener('click', () => {
+            tabEmail.classList.add('active');
+            tabOtp.classList.remove('active');
+            contentEmail.style.display = 'block';
+            contentOtp.style.display = 'none';
+            alertBox.classList.add('hidden');
+        });
+
+        tabOtp.addEventListener('click', () => {
+            tabOtp.classList.add('active');
+            tabEmail.classList.remove('active');
+            contentOtp.style.display = 'block';
+            contentEmail.style.display = 'none';
+            if(errorBoxPhp) errorBoxPhp.style.display = 'none';
+        });
+
+        const phoneStep = document.getElementById('phone-step');
+        const otpStep = document.getElementById('otp-step');
+        const phoneNumberInput = document.getElementById('phone-number');
+        const sendOtpBtn = document.getElementById('send-otp-btn');
+        const verifyOtpBtn = document.getElementById('verify-otp-btn');
+        const otpInput = document.getElementById('otp-code');
+        const phoneSentTo = document.getElementById('phone-sent-to');
+
+        window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', { 'size': 'invisible' });
+
+        const showAlert = (message, type = 'error') => {
+            alertBox.innerHTML = message;
+            alertBox.className = `p-4 mb-4 text-sm rounded-lg ${type === 'error' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`;
+            alertBox.classList.remove('hidden');
+        };
+
+        const handleSendOtp = () => {
+            const phoneNumber = "+57" + phoneNumberInput.value.replace(/\s/g, '');
+            if (phoneNumber.length !== 13) { showAlert('Por favor, ingresa un número de celular válido de 10 dígitos.'); return; }
+
+            sendOtpBtn.disabled = true;
+            sendOtpBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Enviando...';
+
+            auth.signInWithPhoneNumber(phoneNumber, window.recaptchaVerifier)
+                .then((confirmationResult) => {
+                    window.confirmationResult = confirmationResult;
+                    phoneStep.style.display = 'none';
+                    otpStep.style.display = 'block';
+                    phoneSentTo.textContent = phoneNumber;
+                    showAlert('Código enviado con éxito.', 'success');
+                }).catch((error) => {
+                    console.error("Error al enviar OTP:", error);
+                    let userMessage = 'No se pudo enviar el código. Revisa la consola para más detalles.';
+                    if (error.code === 'auth/network-request-failed') {
+                        userMessage = 'Error de Red: No se pudo conectar con los servicios de Google. Revisa tu conexión, firewall o extensiones.';
+                    } else if (error.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.') {
+                         userMessage = 'Error de Configuración: La API Key de Firebase no es correcta.';
+                    } else if (error.code === 'auth/too-many-requests') {
+                         userMessage = 'Demasiadas solicitudes. Intenta de nuevo más tarde.';
+                    }
+                    showAlert(userMessage);
+                }).finally(() => {
+                    sendOtpBtn.disabled = false;
+                    sendOtpBtn.innerHTML = '<i class="fas fa-mobile-alt mr-2"></i>Enviar código';
+                });
+        };
+
+        const handleVerifyOtp = () => {
+            const code = otpInput.value;
+            if (code.length !== 6) { showAlert('El código debe tener 6 dígitos.'); return; }
+
+            verifyOtpBtn.disabled = true;
+            verifyOtpBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Verificando...';
+
+            window.confirmationResult.confirm(code).then(result => result.user.getIdToken(true))
+            .then(idToken => {
+                return fetch('ajax/verify_firebase_token.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: idToken })
+                });
+            })
+            // --- INICIO DE LA CORRECCIÓN ---
+            // Esta nueva lógica maneja correctamente las respuestas de error del servidor.
+            .then(response => {
+                // Primero, clonamos la respuesta para poder leerla dos veces (una para JSON, otra para texto si falla)
+                const clone = response.clone();
+                return response.json().catch(() => {
+                    // Si falla el parseo de JSON, leemos la respuesta como texto para ver el error HTML.
+                    return clone.text().then(text => {
+                         throw new Error("Respuesta inesperada del servidor: " + text);
+                    })
+                })
+                .then(data => {
+                    if (!response.ok) {
+                        // Si la respuesta no es 2xx, lanzamos un error con los detalles del JSON.
+                        throw data;
+                    }
+                    return data;
+                });
+            })
+            .then(data => {
+                showAlert('¡Verificación exitosa! Redirigiendo...', 'success');
+                window.location.href = 'dashboard.php';
+            })
+            .catch(errorData => {
+                console.error("Error en la verificación:", errorData);
+                let userMessage = 'Ocurrió un error inesperado. Intenta de nuevo.';
+
+                // Usamos el mensaje de error que nos envía nuestro propio backend.
+                if (errorData && errorData.error) {
+                    if (errorData.error === 'USER_NOT_FOUND') {
+                        userMessage = "Este número no está registrado. <a href='register.php' class='font-bold underline'>Regístrate aquí para continuar.</a>";
+                    } else if (errorData.error === 'USER_SUSPENDED') {
+                        userMessage = 'Tu cuenta ha sido suspendida. Por favor, contacta a soporte.';
+                    } else {
+                        userMessage = errorData.error;
+                    }
+                } else if (errorData && errorData.message) {
+                    userMessage = errorData.message;
+                }
+
+                showAlert(userMessage);
+            })
+            // --- FIN DE LA CORRECCIÓN ---
+            .finally(() => {
+                 verifyOtpBtn.disabled = false;
+                 verifyOtpBtn.innerHTML = '<i class="fas fa-check-circle mr-2"></i>Verificar y Entrar';
+            });
+        };
+
+        sendOtpBtn.addEventListener('click', handleSendOtp);
+        verifyOtpBtn.addEventListener('click', handleVerifyOtp);
+
+    </script>
 </body>
 </html>

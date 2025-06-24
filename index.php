@@ -131,7 +131,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
     <link rel="icon" href="data:image/svg+xml,%3csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg' fill='currentColor'%3e%3cpath d='M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z'/%3e%3cpath d='M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z'/%3e%3c/svg%3e">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <style>
         body { font-family: 'Inter', sans-serif; }
         .form-container {
@@ -139,7 +139,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             background-size: cover;
             background-position: center;
         }
-        /* --- Estilos para la Animación Global --- */
         .live-feed-container {
             position: relative;
             width: 100%;
@@ -181,17 +180,112 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         }
 
         @keyframes slideAndFade {
-            0% {
-                transform: translateX(100vw);
-                opacity: 1;
-            }
-            90% {
-                opacity: 1;
-            }
-            100% {
-                transform: translateX(-100%);
-                opacity: 0;
-            }
+            0% { transform: translateX(100vw); opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateX(-100%); opacity: 0; }
+        }
+
+        /* --- ESTILOS DEL CHAT (PALETA SLATE) --- */
+        #chat-bubble {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            width: 60px;
+            height: 60px;
+            background-color: #1e293b; /* slate-800 */
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            cursor: pointer;
+            transition: transform 0.2s ease, background-color 0.2s ease;
+            z-index: 999;
+        }
+        #chat-bubble:hover {
+            background-color: #334155; /* slate-700 */
+            transform: scale(1.1);
+        }
+        #chat-window {
+            position: fixed;
+            bottom: 100px;
+            right: 25px;
+            width: 350px;
+            max-width: 90vw;
+            height: 500px;
+            background-color: #ffffff;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+            transform-origin: bottom right;
+        }
+        #chat-window.open {
+            display: flex;
+            animation: pop-up 0.3s ease-out;
+        }
+        @keyframes pop-up {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .chat-header {
+            background-color: #1e293b; /* slate-800 */
+            color: white;
+            padding: 15px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-header #close-chat { cursor: pointer; font-size: 20px; }
+        .chat-messages {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f1f5f9; /* slate-100 */
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .message.user {
+            background-color: #1e293b; /* slate-800 */
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 5px;
+        }
+        .message.admin {
+            background-color: #e2e8f0; /* slate-200 */
+            color: #1e293b; /* slate-800 */
+            align-self: flex-start;
+            border-bottom-left-radius: 5px;
+        }
+        .chat-input { display: flex; border-top: 1px solid #e2e8f0; padding: 10px; background-color: #ffffff; }
+        .chat-input input {
+            flex-grow: 1;
+            border: 1px solid #cbd5e1; /* slate-300 */
+            border-radius: 20px;
+            padding: 10px 15px;
+            font-size: 14px;
+            outline: none;
+        }
+        .chat-input button {
+            background: none;
+            border: none;
+            color: #334155; /* slate-700 */
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0 10px;
         }
     </style>
 </head>
@@ -209,7 +303,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <div class="hidden md:flex items-center space-x-4">
                         <?php if (isset($_SESSION['user_id'])): ?>
                             <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
-                            <a href="support.php" class="text-slate-600 font-medium hover:text-blue-600">Soporte</a> <!-- ENLACE AÑADIDO -->
+                            <a href="support.php" class="text-slate-600 font-medium hover:text-blue-600">Soporte</a>
                             <a href="edit_profile.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Perfil</a>
                             <a href="logout.php" class="bg-slate-200 text-slate-800 font-bold py-2 px-4 rounded-lg hover:bg-slate-300 text-sm">Cerrar Sesión</a>
                         <?php else: ?>
@@ -239,7 +333,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         <div class="w-full md:w-1/2 p-8 md:p-12 flex items-center justify-center form-container relative">
             <div class="absolute inset-0 bg-white/80 backdrop-blur-sm"></div>
             <div class="max-w-md w-full relative">
-                 <!-- Animación Global -->
                 <div class="live-feed-container rounded-t-2xl">
                     <div id="track-1" class="feed-track feed-track-1"></div>
                     <div id="track-2" class="feed-track feed-track-2"></div>
@@ -248,7 +341,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <div class="text-center mb-6"><h2 class="text-2xl font-bold text-slate-900">Iniciar una Transacción Segura</h2>
                         <?php if (!isset($_SESSION['user_id'])): ?><p class="mt-2 text-sm text-amber-800 bg-amber-100 p-3 rounded-lg">Debes <a href="login.php" class="font-bold underline text-slate-800">iniciar sesión</a> o <a href="register.php" class="font-bold underline text-slate-800">registrarte</a> para poder crear una transacción.</p><?php endif; ?>
                     </div>
-                    <?php if (!empty($message)): ?><div class="p-4 mb-4 text-sm rounded-lg <?php echo $message_type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>"><?php echo $message; ?></div><?php endif; ?>
+                    <?php if (!empty($message)): ?><div class="p-4 mb-4 text-sm rounded-lg <?php echo $message_type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
                     <form id="create-transaction-form" action="index.php" method="POST" class="<?php echo !isset($_SESSION['user_id']) ? 'opacity-50 pointer-events-none' : ''; ?>">
                         <input type="hidden" name="create_transaction" value="1">
                         <div class="space-y-4">
@@ -279,7 +372,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                  <ul class="space-y-4 text-lg">
                     <?php if (isset($_SESSION['user_id'])): ?>
                         <li><a href="dashboard.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Panel</a></li>
-                        <li><a href="support.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Soporte</a></li> <!-- ENLACE AÑADIDO -->
+                        <li><a href="support.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Soporte</a></li>
                         <li><a href="edit_profile.php" class="block p-2 rounded-md font-medium text-slate-700 hover:bg-slate-100">Mi Perfil</a></li>
                         <li><a href="logout.php" class="block p-2 rounded-md font-medium text-red-600 hover:bg-red-50">Cerrar Sesión</a></li>
                     <?php else: ?>
@@ -290,32 +383,41 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             </nav>
         </div>
     </div>
+
+    <!-- ===================================================== -->
+    <!-- INICIO: ELEMENTOS DEL CHAT AÑADIDOS -->
+    <?php if (isset($_SESSION['user_id'])): ?>
+        <div id="chat-bubble">
+            <i class="fa-solid fa-comments"></i>
+        </div>
+
+        <div id="chat-window">
+            <div class="chat-header">
+                <span>Soporte en Línea</span>
+                <span id="close-chat">&times;</span>
+            </div>
+            <div class="chat-messages"></div>
+            <div class="chat-input">
+                <input type="text" id="chat-message-input" placeholder="Escribe tu mensaje...">
+                <button id="send-chat-message"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+        </div>
+    <?php endif; ?>
+    <!-- FIN: ELEMENTOS DEL CHAT AÑADIDOS -->
+    <!-- ===================================================== -->
+
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            // Manejo del menú móvil
+            // --- MANEJO DEL MENÚ MÓVIL ---
             const mobileMenuButton = document.getElementById('mobile-menu-button');
             const closeMenuButton = document.getElementById('close-menu-button');
             const mobileMenu = document.getElementById('mobile-menu');
 
-            if (mobileMenuButton) {
-                mobileMenuButton.addEventListener('click', function() {
-                    if (mobileMenu) mobileMenu.classList.remove('hidden');
-                });
-            }
-            if(closeMenuButton) {
-                closeMenuButton.addEventListener('click', function() {
-                    if (mobileMenu) mobileMenu.classList.add('hidden');
-                });
-            }
-            if(mobileMenu){
-                mobileMenu.addEventListener('click', function(event) {
-                    if (event.target === mobileMenu) {
-                        mobileMenu.classList.add('hidden');
-                    }
-                });
-            }
+            if (mobileMenuButton) { mobileMenuButton.addEventListener('click', () => mobileMenu.classList.remove('hidden')); }
+            if(closeMenuButton) { closeMenuButton.addEventListener('click', () => mobileMenu.classList.add('hidden')); }
+            if(mobileMenu){ mobileMenu.addEventListener('click', (e) => { if (e.target === mobileMenu) mobileMenu.classList.add('hidden'); }); }
 
-            // Lógica para el desglose de comisiones del formulario
+            // --- LÓGICA DEL FORMULARIO DE TRANSACCIONES ---
             const amountInput = document.getElementById('amount');
             if (amountInput) {
                 const commissionBreakdown = document.getElementById('commission-breakdown');
@@ -377,14 +479,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }
                 amountInput.addEventListener('input', calculateAndShowFees);
                 commissionPayers.forEach(radio => radio.addEventListener('change', calculateAndShowFees));
+                calculateAndShowFees();
             }
 
-            // --- Animación Global de Transacciones ---
+            // --- ANIMACIÓN GLOBAL DE TRANSACCIONES (RESTAURADA) ---
             const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
             if(tracks[0] && tracks[1]) {
                 let allCities = [];
                 let allAmounts = [];
-                let trackStatus = [true, true]; // true = disponible
+                let trackStatus = [true, true];
 
                 const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
                 const messages = [
@@ -397,7 +500,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
                 function createFeedItem() {
                     if (allCities.length === 0 || allAmounts.length === 0) return;
-
                     const availableTrackIndex = trackStatus.findIndex(status => status === true);
                     if (availableTrackIndex === -1) return;
 
@@ -409,12 +511,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     const city = getRandomItem(allCities);
                     const amount = formatter.format(getRandomItem(allAmounts));
                     const messageTemplate = getRandomItem(messages);
-
                     item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', amount)}`;
 
                     const animationDuration = 15 + Math.random() * 10;
                     item.style.animationDuration = `${animationDuration}s`;
-
                     track.appendChild(item);
 
                     setTimeout(() => {
@@ -426,26 +526,107 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 async function startLiveFeed() {
                     try {
                         const response = await fetch('get_realtime_data.php');
-                        if (!response.ok) {
-                           throw new Error(`HTTP error! status: ${response.status}`);
-                        }
+                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                         const data = await response.json();
                         if (data.cities && data.cities.length > 0 && data.amounts && data.amounts.length > 0) {
                             allCities = data.cities;
                             allAmounts = data.amounts;
-
-                            // Iniciar la animación
                             createFeedItem();
-                            setTimeout(createFeedItem, 2000); // Empezar la segunda linea con un retraso
-                            setInterval(createFeedItem, 4000); // Crear nuevos items cada 4 segundos
-                        } else {
-                            console.log("No hay datos de ciudades o montos para mostrar en la animación.");
+                            setTimeout(createFeedItem, 2000);
+                            setInterval(createFeedItem, 4000);
                         }
                     } catch (error) {
-                        console.error("Error al cargar datos para la animación en vivo:", error);
+                        console.error("Error al cargar datos para la animación:", error);
                     }
                 }
                 startLiveFeed();
+            }
+
+            // --- LÓGICA DEL CHAT ---
+            const chatBubble = document.getElementById('chat-bubble');
+            if (chatBubble) {
+                const chatWindow = document.getElementById('chat-window');
+                const closeChat = document.getElementById('close-chat');
+                const messagesContainer = document.querySelector('.chat-messages');
+                const messageInput = document.getElementById('chat-message-input');
+                const sendButton = document.getElementById('send-chat-message');
+
+                let conversationId = null;
+                let pollingInterval = null;
+
+                const addMessageToScreen = (message, sender) => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.classList.add('message', sender);
+                    messageDiv.textContent = message;
+                    messagesContainer.appendChild(messageDiv);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                };
+
+                const sendMessage = async () => {
+                    const messageText = messageInput.value.trim();
+                    if (messageText === '' || !conversationId) return;
+                    addMessageToScreen(messageText, 'user');
+                    messageInput.value = '';
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'sendMessage');
+                        formData.append('message', messageText);
+                        formData.append('conversation_id', conversationId);
+                        const response = await fetch('ajax/chat_handler.php', { method: 'POST', body: formData });
+                        const result = await response.json();
+                        if (!result.success) { console.error('Error al enviar mensaje:', result.error); }
+                    } catch (error) { console.error('Fetch error:', error); }
+                };
+
+                const loadChatHistory = async () => {
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'getHistory');
+                        const response = await fetch('ajax/chat_handler.php', { method: 'POST', body: formData });
+                        const result = await response.json();
+
+                        messagesContainer.innerHTML = '';
+                        if (result.success) {
+                            conversationId = result.conversation_id;
+                            if (result.messages.length === 0) {
+                                addMessageToScreen('¡Hola! ¿Cómo podemos ayudarte hoy?', 'admin');
+                            } else {
+                                result.messages.forEach(msg => addMessageToScreen(msg.message, msg.sender_type));
+                            }
+                        } else {
+                           addMessageToScreen('¡Hola! ¿Cómo podemos ayudarte hoy?', 'admin');
+                           console.error('Error al obtener historial:', result.error);
+                        }
+                    } catch (error) { console.error('Error al cargar historial:', error); }
+                };
+
+                const pollForNewMessages = async () => {
+                    if (!conversationId) return;
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'getNewMessages');
+                        formData.append('conversation_id', conversationId);
+                        const response = await fetch('ajax/chat_handler.php', { method: 'POST', body: formData });
+                        const result = await response.json();
+                        if (result.success && result.messages.length > 0) {
+                            result.messages.forEach(msg => addMessageToScreen(msg.message, msg.sender_type));
+                        }
+                    } catch (error) { console.error('Error en polling:', error); }
+                };
+
+                chatBubble.addEventListener('click', () => {
+                    chatWindow.classList.add('open');
+                    loadChatHistory();
+                    if (!pollingInterval) pollingInterval = setInterval(pollForNewMessages, 5000);
+                });
+
+                closeChat.addEventListener('click', () => {
+                    chatWindow.classList.remove('open');
+                    if(pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+                });
+
+                sendButton.addEventListener('click', sendMessage);
+                messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
             }
         });
     </script>
