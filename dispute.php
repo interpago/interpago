@@ -5,13 +5,36 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/send_notification.php';
+if (file_exists(__DIR__ . '/lib/send_notification.php')) {
+    require_once __DIR__ . '/send_notification.php';
+}
 session_start();
 
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_uuid'])) {
     header("Location: login.php");
     exit;
 }
+
+// --- INICIO: FUNCIÓN DE AYUDA PARA MENSAJES DEL SISTEMA ---
+/**
+ * Agrega un mensaje automático al chat de la transacción.
+ *
+ * @param mysqli $conn Conexión a la base de datos.
+ * @param int $transaction_id ID de la transacción.
+ * @param string $message El mensaje a enviar.
+ */
+function add_system_message($conn, $transaction_id, $message) {
+    try {
+        $stmt = $conn->prepare("INSERT INTO messages (transaction_id, sender_role, message) VALUES (?, 'System', ?)");
+        $stmt->bind_param("is", $transaction_id, $message);
+        $stmt->execute();
+        $stmt->close();
+    } catch (Exception $e) {
+        // En un entorno de producción, esto debería registrarse en un archivo de log.
+        error_log("Error al agregar mensaje del sistema para tx_id $transaction_id: " . $e->getMessage());
+    }
+}
+// --- FIN: FUNCIÓN DE AYUDA ---
 
 $error = '';
 $success = '';
@@ -23,8 +46,8 @@ if (empty($transaction_uuid)) {
 }
 
 // Verificar que la transacción pertenece al usuario y está en un estado válido para disputa
-$stmt = $conn->prepare("SELECT * FROM transactions WHERE transaction_uuid = ? AND buyer_id = ? AND status IN ('funded', 'shipped', 'received')");
-$stmt->bind_param("si", $transaction_uuid, $_SESSION['user_id']);
+$stmt = $conn->prepare("SELECT * FROM transactions WHERE transaction_uuid = ? AND buyer_uuid = ? AND status IN ('funded', 'shipped', 'received')");
+$stmt->bind_param("ss", $transaction_uuid, $_SESSION['user_uuid']);
 $stmt->execute();
 $result = $stmt->get_result();
 
@@ -59,10 +82,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $update_stmt->bind_param("sssi", $new_status, $reason, $evidence_path, $transaction['id']);
 
             if ($update_stmt->execute()) {
-                send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
-                // --- INICIO DE CORRECCIÓN: Redirección segura ---
+                // --- INICIO: AÑADIR MENSAJE DE DISPUTA AL CHAT ---
+                $dispute_message = "Se ha abierto una disputa en la transacción. El proceso queda en pausa hasta que nuestro equipo de soporte pueda mediar. Se contactará a ambas partes por los canales oficiales.";
+                add_system_message($conn, $transaction['id'], $dispute_message);
+                // --- FIN: AÑADIR MENSAJE ---
+
+                if(function_exists('send_notification')) {
+                    send_notification($conn, "status_update", ['transaction_uuid' => $transaction_uuid, 'new_status' => $new_status]);
+                }
+
+                $_SESSION['success_message'] = "La disputa ha sido abierta. Nuestro equipo se pondrá en contacto pronto.";
                 header("Location: transaction.php?tx_uuid=" . $transaction_uuid);
-                // --- FIN DE CORRECCIÓN ---
                 exit;
             } else {
                 $error = "Error al registrar la disputa en la base de datos.";
@@ -94,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <form action="dispute.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" method="POST" enctype="multipart/form-data" class="space-y-6">
                 <div>
                     <label for="reason" class="block text-sm font-medium text-slate-700">Motivo de la disputa</label>
-                    <textarea name="reason" id="reason" rows="6" class="mt-1 w-full p-3 border border-slate-300 rounded-lg" placeholder="Ej: El producto llegó dañado, no es el artículo que pedí, etc." required></textarea>
+                    <textarea name="reason" id="reason" rows="6" class="mt-1 w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ej: El producto llegó dañado, no es el artículo que pedí, etc." required></textarea>
                     <p class="text-xs text-slate-500 mt-1">Sé lo más detallado posible. Esto nos ayudará a resolver el caso rápidamente.</p>
                 </div>
                 <div>
@@ -104,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 <div class="flex justify-between items-center pt-4 border-t">
                     <a href="transaction.php?tx_uuid=<?php echo htmlspecialchars($transaction_uuid); ?>" class="text-slate-600 hover:underline">Cancelar</a>
-                    <button type="submit" class="bg-red-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-700"><i class="fas fa-exclamation-triangle mr-2"></i>Confirmar y Abrir Disputa</button>
+                    <button type="submit" class="bg-red-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-red-700 transition-transform transform hover:scale-105"><i class="fas fa-exclamation-triangle mr-2"></i>Confirmar y Abrir Disputa</button>
                 </div>
             </form>
         </div>

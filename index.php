@@ -95,12 +95,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 $gateway_cost = ($amount * GATEWAY_PERCENTAGE_COST) + GATEWAY_FIXED_COST;
                 $total_commission = $our_fee + $gateway_cost;
 
-                // Lógica de cálculo de monto neto actualizada
                 if ($commission_payer === 'seller') {
                     $net_amount = $amount - $total_commission;
                 } elseif ($commission_payer === 'split') {
                     $net_amount = $amount - ($total_commission / 2);
-                } else { // 'buyer' or any other case
+                } else {
                     $net_amount = $amount;
                 }
 
@@ -186,16 +185,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight">Compra y Vende en Línea sin Riesgos.</h1>
                 <p class="mt-4 text-lg text-slate-600">Nuestra plataforma retiene el pago de forma segura hasta que ambas partes estén satisfechas, eliminando el fraude en el comercio online.</p>
                 <div class="mt-10 space-y-6">
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-xl"><i class="fas fa-file-signature"></i></div><div class="ml-4"><h3 class="text-lg font-bold">1. Define el Acuerdo</h3><p class="text-slate-600">Registra los términos de la venta para total transparencia.</p></div></div>
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-xl"><i class="fas fa-shield-halved"></i></div><div class="ml-4"><h3 class="text-lg font-bold">2. Deposita el Pago</h3><p class="text-slate-600">El comprador paga. Nosotros retenemos el dinero de forma segura.</p></div></div>
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
+                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-file-signature"></i></div><div class="ml-4"><h3 class="text-lg font-bold">1. Define el Acuerdo</h3><p class="text-slate-600">Registra los términos de la venta para total transparencia.</p></div></div>
+                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-lock"></i></div><div class="ml-4"><h3 class="text-lg font-bold">2. Deposita el Pago</h3><p class="text-slate-600">El comprador paga. Nosotros retenemos el dinero de forma segura.</p></div></div>
+                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
                 </div>
             </div>
         </div>
         <div class="w-full md:w-1/2 p-8 md:p-12 flex items-center justify-center form-container relative">
             <div class="absolute inset-0 bg-white/80 backdrop-blur-sm"></div>
             <div class="max-w-md w-full relative">
-                <div class="live-feed-container rounded-t-2xl"><div id="track-1" class="feed-track feed-track-1"></div><div id="track-2" class="feed-track feed-track-2"></div></div>
+                <div class="live-feed-container rounded-t-2xl">
+                    <div id="track-1" class="feed-track feed-track-1"></div>
+                    <div id="track-2" class="feed-track feed-track-2"></div>
+                </div>
                 <div class="bg-white/90 p-8 rounded-b-2xl shadow-2xl w-full">
                     <div class="text-center mb-6"><h2 class="text-2xl font-bold text-slate-900">Iniciar una Transacción Segura</h2><?php if (!isset($_SESSION['user_id'])): ?><p class="mt-2 text-sm text-amber-800 bg-amber-100 p-3 rounded-lg">Debes <a href="login.php" class="font-bold underline text-slate-800">iniciar sesión</a> o <a href="register.php" class="font-bold underline text-slate-800">registrarte</a> para poder crear una transacción.</p><?php endif; ?></div>
                     <?php if (!empty($message)): ?><div class="p-4 mb-4 text-sm rounded-lg <?php echo $message_type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
@@ -206,8 +208,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Correo de la Contraparte</label><input name="counterparty_email" type="email" placeholder="email@ejemplo.com" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Descripción del Producto</label><textarea name="product_description" placeholder="Ej: iPhone 14 Pro, 256GB" class="w-full p-3 border border-slate-300 rounded-lg" required></textarea></div>
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Monto del Acuerdo (COP)</label><input id="amount" name="amount" type="number" step="0.01" placeholder="Ej: 350000" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
-
-                            <!-- SECCIÓN DE COMISIONES RESTAURADA Y MEJORADA -->
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">¿Quién asume la comisión?</label>
                                 <div class="grid grid-cols-3 gap-2 rounded-lg bg-slate-200 p-1">
@@ -217,11 +217,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                                 </div>
                             </div>
                             <div id="commission-breakdown" class="p-3 bg-slate-100 rounded-lg space-y-1 hidden"></div>
-                            <!-- FIN DE LA SECCIÓN DE COMISIONES -->
-
                             <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
                         </div>
                     </form>
+                    <div class="mt-8 pt-6 border-t border-slate-200 text-center">
+                        <p class="text-sm font-medium text-slate-600 mb-4">Aceptamos los principales métodos de pago</p>
+                        <div class="flex justify-center items-center flex-wrap gap-x-8 gap-y-4">
+                            <img src="assets/images/wompi.svg" alt="Pagos con Wompi" class="h-20 w-auto" title="Pagos seguros con Wompi">
+                            <img src="assets/images/visa.svg" alt="Visa" class="h-8 w-auto" title="Visa">
+                            <img src="assets/images/mastercard.svg" alt="Mastercard" class="h-8 w-auto" title="Mastercard">
+                            <img src="assets/images/pse.svg" alt="PSE" class="h-8 w-auto" title="PSE">
+                            <img src="assets/images/bancolombia.svg" alt="Bancolombia" class="h-8 w-auto" title="Bancolombia">
+                            <img src="assets/images/Nequi.svg" alt="Nequi" class="h-8 w-auto" title="Nequi">
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -237,7 +246,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        // --- Lógica del Menú Móvil ---
         const mobileMenuButton = document.getElementById('mobile-menu-button');
         const closeMenuButton = document.getElementById('close-menu-button');
         const mobileMenu = document.getElementById('mobile-menu');
@@ -245,7 +253,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         if (closeMenuButton) { closeMenuButton.addEventListener('click', () => mobileMenu.classList.add('hidden')); }
         if (mobileMenu) { mobileMenu.addEventListener('click', (e) => { if (e.target === mobileMenu) mobileMenu.classList.add('hidden'); }); }
 
-        // --- LÓGICA DEL FORMULARIO DE TRANSACCIONES (RESTAURADA Y MEJORADA) ---
         const amountInput = document.getElementById('amount');
         if (amountInput) {
             const commissionBreakdown = document.getElementById('commission-breakdown');
@@ -283,26 +290,181 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <hr class="my-1 border-slate-200">
                     <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
                     <hr class="my-1 border-dashed">
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comprador Paga:</span><span class="text-slate-800">${formatter.format(buyerPays)}</span></div>
+                    <div class="flex justify-between text-sm font-bold"><span class="text-green-600">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
+                    <div class="flex justify-between text-sm font-bold"><span class="text-red-600">Comprador Paga:</span><span class="text-red-600">${formatter.format(buyerPays)}</span></div>
                 `;
                 commissionBreakdown.classList.remove('hidden');
             }
             amountInput.addEventListener('input', calculateAndShowFees);
             commissionPayers.forEach(radio => radio.addEventListener('change', calculateAndShowFees));
-            calculateAndShowFees(); // Calcular al cargar la página por si hay valores pre-llenados
+            calculateAndShowFees();
         }
 
-        // --- Lógica de Animación "Live Feed" ---
         const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
         if(tracks[0] && tracks[1]) {
-            // ... Tu lógica de animación ...
+            let allCities = [];
+            let allAmounts = [];
+            let trackStatus = [true, true];
+
+            const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+            const messages = [
+                "Alguien en&nbsp;<b>{city}</b>&nbsp;completó una transacción de&nbsp;<b>{amount}</b>",
+                "Un pago de&nbsp;<b>{amount}</b>&nbsp;fue liberado a un usuario en&nbsp;<b>{city}</b>",
+                "Nueva transacción iniciada desde&nbsp;<b>{city}</b>&nbsp;por&nbsp;<b>{amount}</b>"
+            ];
+
+            const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+            function createFeedItem() {
+                if (allCities.length === 0 || allAmounts.length === 0) return;
+                const availableTrackIndex = trackStatus.findIndex(status => status === true);
+                if (availableTrackIndex === -1) return;
+                trackStatus[availableTrackIndex] = false;
+                const track = tracks[availableTrackIndex];
+                const item = document.createElement('div');
+                item.className = 'feed-item';
+                const city = getRandomItem(allCities);
+                const amount = formatter.format(getRandomItem(allAmounts));
+                const messageTemplate = getRandomItem(messages);
+                item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', amount)}`;
+                const animationDuration = 15 + Math.random() * 10;
+                item.style.animationDuration = `${animationDuration}s`;
+                track.appendChild(item);
+                setTimeout(() => {
+                    item.remove();
+                    trackStatus[availableTrackIndex] = true;
+                }, animationDuration * 1000);
+            }
+
+            async function startLiveFeed() {
+                try {
+                    const response = await fetch('get_realtime_data.php');
+                    const data = await response.json();
+                    if (data.cities && data.amounts) {
+                        allCities = data.cities;
+                        allAmounts = data.amounts;
+                        setInterval(createFeedItem, 3000);
+                    }
+                } catch (error) {
+                    console.error("Error al cargar datos para el live feed:", error);
+                }
+            }
+            startLiveFeed();
         }
 
-        // --- Lógica del Chat ---
         const chatBubble = document.getElementById('chat-bubble');
         if (chatBubble) {
-            // ... Tu lógica de chat ...
+            const chatWindow = document.getElementById('chat-window');
+            const closeChat = document.getElementById('close-chat');
+            const chatMessages = document.querySelector('.chat-messages');
+            const chatInput = document.getElementById('chat-message-input');
+            const sendButton = document.getElementById('send-chat-message');
+
+            let conversationId = null;
+            let chatPollInterval = null;
+
+            function appendMessage(senderType, text) {
+                const messageElem = document.createElement('div');
+                messageElem.classList.add('message', senderType === 'user' ? 'user' : 'admin');
+                messageElem.textContent = text;
+                chatMessages.appendChild(messageElem);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            async function initChat() {
+                try {
+                    const response = await fetch('ajax/chat_handler.php?action=getHistory');
+                    const data = await response.json();
+
+                    if (data.error || !data.success) throw new Error(data.error || 'Respuesta inválida del servidor');
+
+                    conversationId = data.conversation_id;
+                    chatMessages.innerHTML = '';
+
+                    data.messages.forEach(msg => {
+                        appendMessage(msg.sender_type, msg.message);
+                    });
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                    if (chatPollInterval) clearInterval(chatPollInterval);
+                    chatPollInterval = setInterval(getUpdates, 3500);
+
+                } catch (err) {
+                    console.error('Error al iniciar el chat:', err);
+                    appendMessage('admin', 'No se pudo conectar al chat. Por favor, recarga la página.');
+                }
+            }
+
+            async function sendMessage() {
+                const messageText = chatInput.value.trim();
+                if (messageText === '' || !conversationId) return;
+
+                const tempMessageText = messageText;
+                appendMessage('user', tempMessageText);
+                chatInput.value = '';
+
+                const formData = new FormData();
+                formData.append('action', 'sendMessage');
+                formData.append('conversation_id', conversationId);
+                formData.append('message', tempMessageText);
+
+                try {
+                    const response = await fetch('ajax/chat_handler.php', { method: 'POST', body: formData });
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.error || 'Fallo al enviar el mensaje');
+                } catch (err) {
+                    console.error('Error al enviar mensaje:', err);
+                    appendMessage('admin', 'Error: Tu mensaje no pudo ser enviado.');
+                }
+            }
+
+            async function getUpdates() {
+                if (!conversationId) return;
+                try {
+                    const formData = new FormData();
+                    formData.append('action', 'getNewMessages');
+                    formData.append('conversation_id', conversationId);
+
+                    const response = await fetch('ajax/chat_handler.php', {method: 'POST', body: formData});
+                    const data = await response.json();
+
+                    if (data.error || !data.success) throw new Error(data.error || 'Respuesta inválida del servidor');
+
+                    if (data.messages && data.messages.length > 0) {
+                        data.messages.forEach(msg => {
+                            if (msg.sender_type === 'admin') {
+                                appendMessage(msg.sender_type, msg.message);
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.error('Error al obtener actualizaciones del chat:', err);
+                }
+            }
+
+            chatBubble.addEventListener('click', () => {
+                chatWindow.classList.toggle('open');
+                if (chatWindow.classList.contains('open') && !conversationId) {
+                    initChat();
+                } else if (!chatWindow.classList.contains('open')) {
+                    if (chatPollInterval) clearInterval(chatPollInterval);
+                    chatPollInterval = null;
+                }
+            });
+
+            closeChat.addEventListener('click', () => {
+                chatWindow.classList.remove('open');
+                if (chatPollInterval) clearInterval(chatPollInterval);
+                chatPollInterval = null;
+            });
+
+            sendButton.addEventListener('click', sendMessage);
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
         }
     });
     </script>

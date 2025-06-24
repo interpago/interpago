@@ -1,7 +1,7 @@
 <?php
 // get_transaction_updates.php
 
-// Este script devuelve el estado actual y los mensajes de una transacción en formato JSON.
+// Este script devuelve el estado actual y los mensajes nuevos de una transacción en formato JSON.
 
 session_start();
 header('Content-Type: application/json');
@@ -9,13 +9,14 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/config.php';
 
 // Validar que el usuario ha iniciado sesión
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_uuid']) || empty($_SESSION['user_uuid'])) {
     echo json_encode(['error' => 'No autenticado']);
     exit;
 }
 
 $transaction_uuid = $_GET['tx_uuid'] ?? '';
-$last_message_id = $_GET['last_message_id'] ?? 0;
+$last_message_id = (int)($_GET['last_message_id'] ?? 0);
+$client_status = $_GET['current_status'] ?? '';
 
 if (empty($transaction_uuid)) {
     echo json_encode(['error' => 'ID de transacción no proporcionado']);
@@ -24,6 +25,7 @@ if (empty($transaction_uuid)) {
 
 $response = [
     'status_changed' => false,
+    'new_status' => '',
     'new_messages' => []
 ];
 
@@ -40,16 +42,16 @@ try {
         exit;
     }
 
-    $current_user_uuid = $_SESSION['user_uuid'] ?? '';
+    $current_user_uuid = $_SESSION['user_uuid'];
     if ($current_user_uuid !== $transaction['buyer_uuid'] && $current_user_uuid !== $transaction['seller_uuid']) {
         echo json_encode(['error' => 'No autorizado']);
         exit;
     }
 
     // 2. Comprobar si el estado ha cambiado
-    $client_status = $_GET['current_status'] ?? '';
     if ($client_status !== $transaction['status']) {
         $response['status_changed'] = true;
+        $response['new_status'] = $transaction['status'];
     }
 
     // 3. Buscar mensajes más nuevos que el último que tiene el cliente
@@ -64,7 +66,9 @@ try {
             'sender_role' => $msg['sender_role'],
             'message' => nl2br(htmlspecialchars($msg['message'])),
             'image_path' => $msg['image_path'] ? htmlspecialchars($msg['image_path']) : null,
-            'created_at' => date("d/m H:i", strtotime($msg['created_at']))
+            'created_at' => date("d/m H:i", strtotime($msg['created_at'])),
+            'is_system' => $msg['sender_role'] === 'System',
+            'is_current_user' => $msg['sender_role'] === ($_SESSION['user_role'] ?? '') // Necesitamos el rol en la sesión
         ];
     }
     $msg_stmt->close();
@@ -72,7 +76,7 @@ try {
     echo json_encode($response);
 
 } catch (Exception $e) {
-    // En producción, esto debería registrar el error en un archivo, no mostrarlo.
+    http_response_code(500);
     echo json_encode(['error' => 'Error del servidor: ' . $e->getMessage()]);
 }
 ?>
