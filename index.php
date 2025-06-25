@@ -28,23 +28,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
     $current_user_id = $_SESSION['user_id'];
     $current_user_name = $_SESSION['user_name'];
-
-    $current_user_uuid = $_SESSION['user_uuid'] ?? null;
-    if (empty($current_user_uuid)) {
-        $uuid_stmt = $conn->prepare("SELECT user_uuid FROM users WHERE id = ?");
-        $uuid_stmt->bind_param("i", $current_user_id);
-        $uuid_stmt->execute();
-        $uuid_result = $uuid_stmt->get_result()->fetch_assoc();
-        $current_user_uuid = $uuid_result['user_uuid'] ?? null;
-
-        if (empty($current_user_uuid)) {
-            $current_user_uuid = generate_uuid();
-            $update_uuid_stmt = $conn->prepare("UPDATE users SET user_uuid = ? WHERE id = ?");
-            $update_uuid_stmt->bind_param("si", $current_user_uuid, $current_user_id);
-            $update_uuid_stmt->execute();
-        }
-        $_SESSION['user_uuid'] = $current_user_uuid;
-    }
+    $current_user_uuid = $_SESSION['user_uuid'];
 
     $role = $_POST['role'];
     $counterparty_email = trim($_POST['counterparty_email']);
@@ -56,26 +40,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         $message = "Por favor, completa todos los campos correctamente.";
         $message_type = 'error';
     } else {
-        $user_stmt = $conn->prepare("SELECT id, name, email, user_uuid, phone_number FROM users WHERE email = ?");
+        $user_stmt = $conn->prepare("SELECT id, name, user_uuid FROM users WHERE email = ?");
         $user_stmt->bind_param("s", $counterparty_email);
         $user_stmt->execute();
-        $counterparty_result = $user_stmt->get_result();
+        $counterparty = $user_stmt->get_result()->fetch_assoc();
 
-        if ($counterparty_result->num_rows === 0) {
+        if (!$counterparty) {
             $message = "El correo de la contraparte no está registrado.";
             $message_type = 'error';
         } else {
-            $counterparty = $counterparty_result->fetch_assoc();
-            $counterparty_phone = $counterparty['phone_number'] ?? null;
             $counterparty_uuid = $counterparty['user_uuid'];
-
-            if(empty($counterparty_uuid)) {
-                $counterparty_uuid = generate_uuid();
-                $update_uuid_stmt = $conn->prepare("UPDATE users SET user_uuid = ? WHERE id = ?");
-                $update_uuid_stmt->bind_param("si", $counterparty_uuid, $counterparty['id']);
-                $update_uuid_stmt->execute();
-            }
-
             if ($role === 'buyer') {
                 $buyer_id = $current_user_id; $seller_id = $counterparty['id'];
                 $buyer_name = $current_user_name; $seller_name = $counterparty['name'];
@@ -86,40 +60,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 $buyer_uuid = $counterparty_uuid; $seller_uuid = $current_user_uuid;
             }
 
-            if(empty($buyer_uuid) || empty($seller_uuid)) {
-                 $message = "Error inesperado al procesar los identificadores. Por favor, intenta de nuevo.";
-                 $message_type = 'error';
+            $transaction_uuid = generate_uuid();
+
+            $service_fee = $amount * SERVICE_FEE_PERCENTAGE;
+            $gateway_fee = ($amount * GATEWAY_PERCENTAGE_COST) + GATEWAY_FIXED_COST;
+            $commission_before_tax = $service_fee + $gateway_fee;
+            $tax_on_commission = $commission_before_tax * GATEWAY_TAX_PERCENTAGE;
+            $total_commission = $commission_before_tax + $tax_on_commission;
+
+            if ($commission_payer === 'seller') {
+                $net_amount = $amount - $total_commission;
+            } elseif ($commission_payer === 'split') {
+                $net_amount = $amount - ($total_commission / 2);
             } else {
-                $transaction_uuid = generate_uuid();
-                $our_fee = $amount * SERVICE_FEE_PERCENTAGE;
-                $gateway_cost = ($amount * GATEWAY_PERCENTAGE_COST) + GATEWAY_FIXED_COST;
-                $total_commission = $our_fee + $gateway_cost;
+                $net_amount = $amount;
+            }
 
-                if ($commission_payer === 'seller') {
-                    $net_amount = $amount - $total_commission;
-                } elseif ($commission_payer === 'split') {
-                    $net_amount = $amount - ($total_commission / 2);
-                } else {
-                    $net_amount = $amount;
-                }
+            $stmt = $conn->prepare("INSERT INTO transactions (transaction_uuid, seller_name, buyer_name, product_description, amount, commission, net_amount, commission_payer, buyer_id, seller_id, buyer_uuid, seller_uuid, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initiated')");
+            $stmt->bind_param("ssssdddsiiss", $transaction_uuid, $seller_name, $buyer_name, $product_description, $amount, $total_commission, $net_amount, $commission_payer, $buyer_id, $seller_id, $buyer_uuid, $seller_uuid);
 
-                $stmt = $conn->prepare("INSERT INTO transactions (transaction_uuid, seller_name, buyer_name, product_description, amount, commission, net_amount, commission_payer, buyer_id, seller_id, buyer_uuid, seller_uuid, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initiated')");
-                $stmt->bind_param("ssssdddsiiss", $transaction_uuid, $seller_name, $buyer_name, $product_description, $amount, $total_commission, $net_amount, $commission_payer, $buyer_id, $seller_id, $buyer_uuid, $seller_uuid);
-
-                if ($stmt->execute()) {
-                    if (function_exists('send_sms') && $counterparty_phone) {
-                        $formatted_amount = number_format($amount, 0, ',', '.');
-                        $sms_message = "Hola {$counterparty['name']}, {$current_user_name} te ha enviado una nueva propuesta de transacción en Interpago por \${$formatted_amount} COP. Revisa tu panel para aceptarla.";
-                        send_sms($counterparty_phone, $sms_message);
-                    }
-                    $base_url_for_links = rtrim(APP_URL, '/');
-                    $transaction_link = "{$base_url_for_links}/transaction.php?tx_uuid={$transaction_uuid}";
-                    header("Location: " . $transaction_link);
-                    exit;
-                } else {
-                    $message = "Error al crear la transacción: " . $stmt->error;
-                    $message_type = 'error';
-                }
+            if ($stmt->execute()) {
+                header("Location: transaction.php?tx_uuid={$transaction_uuid}");
+                exit;
+            } else {
+                $message = "Error al crear la transacción: " . $stmt->error;
+                $message_type = 'error';
             }
         }
     }
@@ -181,13 +146,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     <button id="mobile-menu-button" class="md:hidden p-2 text-slate-600"><i class="fas fa-bars text-2xl"></i></button>
                 </div>
             </nav>
-            <div class="py-12 md:my-auto">
-                <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight">Compra y Vende en Línea sin Riesgos.</h1>
-                <p class="mt-4 text-lg text-slate-600">Nuestra plataforma retiene el pago de forma segura hasta que ambas partes estén satisfechas, eliminando el fraude en el comercio online.</p>
-                <div class="mt-10 space-y-8">
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-file-signature"></i></div><div class="ml-4"><h3 class="text-lg font-bold">1. Define el Acuerdo</h3><p class="text-slate-600">Registra los términos de la venta para total transparencia.</p></div></div>
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-lock"></i></div><div class="ml-4"><h3 class="text-lg font-bold">2. Deposita el Pago</h3><p class="text-slate-600">El comprador paga. Nosotros retenemos el dinero de forma segura.</p></div></div>
-                    <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
+            <div class="flex-grow flex flex-col pt-16 md:pt-24">
+                <div>
+                    <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight">Compra y Vende en Línea sin Riesgos.</h1>
+                    <p class="mt-4 text-lg text-slate-600">Nuestra plataforma retiene el pago de forma segura hasta que ambas partes estén satisfechas, eliminando el fraude en el comercio online.</p>
+                    <div class="mt-10 space-y-8">
+                        <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-file-signature"></i></div><div class="ml-4"><h3 class="text-lg font-bold">1. Define el Acuerdo</h3><p class="text-slate-600">Registra los términos de la venta para total transparencia.</p></div></div>
+                        <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-lock"></i></div><div class="ml-4"><h3 class="text-lg font-bold">2. Deposita el Pago</h3><p class="text-slate-600">El comprador paga. Nosotros retenemos el dinero de forma segura.</p></div></div>
+                        <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
+                    </div>
+                </div>
+                <div class="mt-auto pt-12">
+                    <p class="text-sm font-medium text-slate-600 mb-4">Aceptamos los principales métodos de pago</p>
+                    <div class="flex items-center flex-wrap gap-x-8 gap-y-4">
+                        <img src="assets/images/wompi.svg" alt="Pagos con Wompi" class="h-20 w-auto" title="Pagos seguros con Wompi">
+                        <img src="assets/images/visa.svg" alt="Visa" class="h-8 w-auto" title="Visa">
+                        <img src="assets/images/mastercard.svg" alt="Mastercard" class="h-8 w-auto" title="Mastercard">
+                        <img src="assets/images/pse.svg" alt="PSE" class="h-8 w-auto" title="PSE">
+                        <img src="assets/images/bancolombia.svg" alt="Bancolombia" class="h-8 w-auto" title="Bancolombia">
+                        <img src="assets/images/Nequi.svg" alt="Nequi" class="h-8 w-auto" title="Nequi">
+                    </div>
                 </div>
             </div>
         </div>
@@ -216,21 +194,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                                     <div><input type="radio" name="commission_payer" id="payer_split" value="split" class="hidden peer"><label for="payer_split" class="block text-center cursor-pointer rounded-md p-2 text-sm font-medium peer-checked:bg-slate-800 peer-checked:text-white">Dividir 50/50</label></div>
                                 </div>
                             </div>
-                            <div id="commission-breakdown" class="p-3 bg-slate-100 rounded-lg space-y-1 hidden"></div>
+                            <div id="commission-breakdown" class="p-4 bg-slate-100 rounded-lg space-y-2 text-sm hidden"></div>
                             <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
                         </div>
                     </form>
-                    <div class="mt-8 pt-6 border-t border-slate-200 text-center">
-                        <p class="text-sm font-medium text-slate-600 mb-4">Aceptamos los principales métodos de pago</p>
-                        <div class="flex justify-center items-center flex-wrap gap-x-8 gap-y-4">
-                            <img src="assets/images/wompi.svg" alt="Pagos con Wompi" class="h-20 w-auto" title="Pagos seguros con Wompi">
-                            <img src="assets/images/visa.svg" alt="Visa" class="h-8 w-auto" title="Visa">
-                            <img src="assets/images/mastercard.svg" alt="Mastercard" class="h-8 w-auto" title="Mastercard">
-                            <img src="assets/images/pse.svg" alt="PSE" class="h-8 w-auto" title="PSE">
-                            <img src="assets/images/bancolombia.svg" alt="Bancolombia" class="h-8 w-auto" title="Bancolombia">
-                            <img src="assets/images/Nequi.svg" alt="Nequi" class="h-8 w-auto" title="Nequi">
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -268,9 +235,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }
 
                 const payer = document.querySelector('input[name="commission_payer"]:checked').value;
-                const ourFee = amount * <?php echo SERVICE_FEE_PERCENTAGE; ?>;
-                const gatewayCost = (amount * <?php echo GATEWAY_PERCENTAGE_COST; ?>) + <?php echo GATEWAY_FIXED_COST; ?>;
-                const totalCommission = ourFee + gatewayCost;
+                const serviceFee = amount * <?php echo SERVICE_FEE_PERCENTAGE; ?>;
+                const gatewayFee = (amount * <?php echo GATEWAY_PERCENTAGE_COST; ?>) + <?php echo GATEWAY_FIXED_COST; ?>;
+                const commissionBeforeTax = serviceFee + gatewayFee;
+                const taxOnCommission = commissionBeforeTax * <?php echo GATEWAY_TAX_PERCENTAGE; ?>;
+                const totalCommission = commissionBeforeTax + taxOnCommission;
 
                 let sellerReceives = amount;
                 let buyerPays = amount;
@@ -285,13 +254,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }
 
                 commissionBreakdown.innerHTML = `
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Tarifa de Servicio Interpago:</span><span class="font-semibold">${formatter.format(ourFee)}</span></div>
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo de Pasarela (wompi.):</span><span class="font-semibold">${formatter.format(gatewayCost)}</span></div>
+                    <div class="flex justify-between text-xs"><span class="text-slate-600">Comisión Interpago:</span><span class="font-semibold">${formatter.format(serviceFee)}</span></div>
+                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayFee)}</span></div>
+                    <div class="flex justify-between text-xs"><span class="text-slate-600">IVA (19%) sobre comisión:</span><span class="font-semibold">${formatter.format(taxOnCommission)}</span></div>
                     <hr class="my-1 border-slate-200">
-                    <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
-                    <hr class="my-1 border-dashed">
-                    <div class="flex justify-between text-sm font-bold"><span class="text-green-600">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
-                    <div class="flex justify-between text-sm font-bold"><span class="text-red-600">Comprador Paga:</span><span class="text-red-600">${formatter.format(buyerPays)}</span></div>
+                    <div class="flex justify-between font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
+                    <hr class="my-1 border-dashed border-slate-300">
+                    <div class="flex justify-between font-bold"><span class="text-green-600">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
+                    <div class="flex justify-between font-bold"><span class="text-red-600">Comprador Paga:</span><span class="text-red-600">${formatter.format(buyerPays)}</span></div>
                 `;
                 commissionBreakdown.classList.remove('hidden');
             }
@@ -309,9 +279,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
 
             const messages = [
-                "Acuerdo de <b>{product}</b>&nbsp;({amount}) completado en <b>{city}</b>",
-                "Pago de <b>{amount}</b>&nbsp;por <b>{product}</b> liberado en <b>{city}</b>",
-                "Nueva transacción por <b>{product}</b>&nbsp;(${amount}) desde <b>{city}</b>"
+                "Acuerdo por {product} ({amount}) completado en {city}",
+                "Pago de {amount} por {product} fue liberado en {city}",
+                "Nueva transacción por {product} ({amount}) desde {city}"
             ];
 
             const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -326,14 +296,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 item.className = 'feed-item';
 
                 const transaction = getRandomItem(allTransactions);
-                const city = getRandomItem(allCities);
-                const amount = formatter.format(transaction.amount);
-                const product = transaction.description;
+                const city = `<b>${getRandomItem(allCities)}</b>`;
+                const amount = `<b>${formatter.format(transaction.amount)}</b>`;
+                const product = `<b>${transaction.description}</b>`;
 
-                const messageTemplate = getRandomItem(messages);
+                let messageTemplate = getRandomItem(messages);
 
-                item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', `<b>${amount}</b>`).replace('{product}', `<b>${product}</b>`)}`;
-                const animationDuration = 15 + Math.random() * 10;
+                let finalMessage = messageTemplate
+                    .replace('{product}', product)
+                    .replace('{amount}', amount)
+                    .replace('{city}', city);
+
+                item.innerHTML = `<i class="fas fa-check-circle"></i>&nbsp;${finalMessage}`;
+
+                const animationDuration = 20 + Math.random() * 10;
                 item.style.animationDuration = `${animationDuration}s`;
                 track.appendChild(item);
                 setTimeout(() => {
@@ -377,7 +353,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
         const chatBubble = document.getElementById('chat-bubble');
         if (chatBubble) {
-            const chatWindow = document.getElementById('chat-window');
+           const chatWindow = document.getElementById('chat-window');
             const closeChat = document.getElementById('close-chat');
             const chatMessages = document.querySelector('.chat-messages');
             const chatInput = document.getElementById('chat-message-input');
