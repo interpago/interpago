@@ -283,18 +283,11 @@ $status_translations = [
                                         </tbody>
                                     </table>
                                 </div>
-                                <!-- Controles de Paginación -->
                                 <?php if ($total_pages > 1): ?>
                                 <div class="p-4 md:p-6 flex justify-between items-center border-t border-slate-100">
-                                    <a href="?page=<?php echo max(1, $page - 1); ?>" class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 <?php if($page <= 1){ echo 'pointer-events-none opacity-50'; } ?>">
-                                        Anterior
-                                    </a>
-                                    <span class="text-sm text-slate-700">
-                                        Página <?php echo $page; ?> de <?php echo $total_pages; ?>
-                                    </span>
-                                    <a href="?page=<?php echo min($total_pages, $page + 1); ?>" class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 <?php if($page >= $total_pages){ echo 'pointer-events-none opacity-50'; } ?>">
-                                        Siguiente
-                                    </a>
+                                    <a href="?page=<?php echo max(1, $page - 1); ?>" class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 <?php if($page <= 1){ echo 'pointer-events-none opacity-50'; } ?>">Anterior</a>
+                                    <span class="text-sm text-slate-700">Página <?php echo $page; ?> de <?php echo $total_pages; ?></span>
+                                    <a href="?page=<?php echo min($total_pages, $page + 1); ?>" class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 <?php if($page >= $total_pages){ echo 'pointer-events-none opacity-50'; } ?>">Siguiente</a>
                                 </div>
                                 <?php endif; ?>
                             </div>
@@ -327,76 +320,80 @@ $status_translations = [
             const sidebar = document.getElementById('sidebar');
             if (menuButton && sidebar) {
                 menuButton.addEventListener('click', () => {
-                    sidebar.classList.remove('hidden', 'lg:flex');
-                    sidebar.classList.add('flex', 'absolute', 'top-0', 'left-0', 'h-full', 'z-50');
-                });
-                document.addEventListener('click', function(event) {
-                    if (!sidebar.contains(event.target) && !menuButton.contains(event.target) && !sidebar.classList.contains('hidden')) {
-                         sidebar.classList.add('hidden');
-                         sidebar.classList.remove('absolute', 'top-0', 'left-0', 'h-full', 'z-50');
-                    }
+                    sidebar.classList.toggle('hidden');
                 });
             }
 
             // Animación Global de Transacciones
-            const liveFeedContainer = document.getElementById('live-feed');
             const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
             if(tracks[0] && tracks[1]) {
                 let allCities = [];
-                let allAmounts = [];
-                let trackStatus = [true, true]; // true = disponible
+                let allTransactions = [];
+                let trackStatus = [true, true];
 
                 const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
-                // --- CORRECCIÓN: Se añaden espacios con &nbsp; para garantizar la separación ---
                 const messages = [
-                    "Alguien en&nbsp;<b>{city}</b>&nbsp;completó una transacción de&nbsp;<b>{amount}</b>",
-                    "Un pago de&nbsp;<b>{amount}</b>&nbsp;fue liberado a un usuario en&nbsp;<b>{city}</b>",
-                    "Nueva transacción iniciada desde&nbsp;<b>{city}</b>&nbsp;por&nbsp;<b>{amount}</b>"
+                    "Acuerdo de <b>{product}</b>&nbsp;({amount}) completado en <b>{city}</b>",
+                    "Pago de <b>{amount}</b>&nbsp;por <b>{product}</b> liberado en <b>{city}</b>",
+                    "Nueva transacción por <b>{product}</b>&nbsp;(${amount}) desde <b>{city}</b>"
                 ];
 
                 const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
                 function createFeedItem() {
-                    if (allCities.length === 0 || allAmounts.length === 0) return;
-
+                    if (allCities.length === 0 || allTransactions.length === 0) return;
                     const availableTrackIndex = trackStatus.findIndex(status => status === true);
                     if (availableTrackIndex === -1) return;
-
                     trackStatus[availableTrackIndex] = false;
                     const track = tracks[availableTrackIndex];
-
                     const item = document.createElement('div');
                     item.className = 'feed-item';
 
+                    const transaction = getRandomItem(allTransactions);
                     const city = getRandomItem(allCities);
-                    const amount = formatter.format(getRandomItem(allAmounts));
+                    const amount = formatter.format(transaction.amount);
+                    const product = transaction.description;
+
                     const messageTemplate = getRandomItem(messages);
 
-                    item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', amount)}`;
-
+                    item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', `<b>${city}</b>`).replace('{amount}', `<b>${amount}</b>`).replace('{product}', `<b>${product}</b>`)}`;
                     const animationDuration = 15 + Math.random() * 10;
                     item.style.animationDuration = `${animationDuration}s`;
-
                     track.appendChild(item);
-
                     setTimeout(() => {
                         item.remove();
                         trackStatus[availableTrackIndex] = true;
                     }, animationDuration * 1000);
                 }
 
+                function initAnimation(data) {
+                    allCities = data.cities;
+                    allTransactions = data.transactions;
+                    setInterval(createFeedItem, 3000);
+                    createFeedItem();
+                    setTimeout(createFeedItem, 1500);
+                }
+
                 async function startLiveFeed() {
+                    const exampleData = {
+                        cities: ["Bogotá", "Medellín", "Cali", "Barranquilla"],
+                        transactions: [
+                            {amount: 75000, description: 'Audífonos'},
+                            {amount: 1500000, description: 'Portátil'},
+                            {amount: 30000, description: 'Suscripción'}
+                        ]
+                    };
+                    initAnimation(exampleData);
+
                     try {
                         const response = await fetch('get_realtime_data.php');
-                        const data = await response.json();
-                        if (data.cities && data.amounts) {
-                            allCities = data.cities;
-                            allAmounts = data.amounts;
-
-                            setInterval(createFeedItem, 2500);
+                        const realData = await response.json();
+                        if (realData.cities && realData.transactions && realData.transactions.length > 0) {
+                            allCities = realData.cities;
+                            allTransactions = realData.transactions;
                         }
                     } catch (error) {
-                        console.error("Error al cargar datos para el live feed:", error);
+                        console.error("Error al cargar datos reales para el live feed:", error);
                     }
                 }
                 startLiveFeed();
