@@ -184,7 +184,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             <div class="py-12 md:my-auto">
                 <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight">Compra y Vende en Línea sin Riesgos.</h1>
                 <p class="mt-4 text-lg text-slate-600">Nuestra plataforma retiene el pago de forma segura hasta que ambas partes estén satisfechas, eliminando el fraude en el comercio online.</p>
-                <div class="mt-10 space-y-6">
+                <div class="mt-10 space-y-8">
                     <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-file-signature"></i></div><div class="ml-4"><h3 class="text-lg font-bold">1. Define el Acuerdo</h3><p class="text-slate-600">Registra los términos de la venta para total transparencia.</p></div></div>
                     <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-lock"></i></div><div class="ml-4"><h3 class="text-lg font-bold">2. Deposita el Pago</h3><p class="text-slate-600">El comprador paga. Nosotros retenemos el dinero de forma segura.</p></div></div>
                     <div class="flex items-start"><div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-slate-100 text-slate-600 text-2xl"><i class="fas fa-hand-holding-dollar"></i></div><div class="ml-4"><h3 class="text-lg font-bold">3. Libera los Fondos</h3><p class="text-slate-600">El comprador confirma la recepción y liberamos el pago al vendedor.</p></div></div>
@@ -286,7 +286,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
                 commissionBreakdown.innerHTML = `
                     <div class="flex justify-between text-xs"><span class="text-slate-600">Tarifa de Servicio Interpago:</span><span class="font-semibold">${formatter.format(ourFee)}</span></div>
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo de Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayCost)}</span></div>
+                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo de Pasarela (wompi.):</span><span class="font-semibold">${formatter.format(gatewayCost)}</span></div>
                     <hr class="my-1 border-slate-200">
                     <div class="flex justify-between text-sm font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
                     <hr class="my-1 border-dashed">
@@ -303,30 +303,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
         if(tracks[0] && tracks[1]) {
             let allCities = [];
-            let allAmounts = [];
+            let allTransactions = [];
             let trackStatus = [true, true];
 
             const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+
             const messages = [
-                "Alguien en&nbsp;<b>{city}</b>&nbsp;completó una transacción de&nbsp;<b>{amount}</b>",
-                "Un pago de&nbsp;<b>{amount}</b>&nbsp;fue liberado a un usuario en&nbsp;<b>{city}</b>",
-                "Nueva transacción iniciada desde&nbsp;<b>{city}</b>&nbsp;por&nbsp;<b>{amount}</b>"
+                "Acuerdo de <b>{product}</b>&nbsp;({amount}) completado en <b>{city}</b>",
+                "Pago de <b>{amount}</b>&nbsp;por <b>{product}</b> liberado en <b>{city}</b>",
+                "Nueva transacción por <b>{product}</b>&nbsp;(${amount}) desde <b>{city}</b>"
             ];
 
             const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
             function createFeedItem() {
-                if (allCities.length === 0 || allAmounts.length === 0) return;
+                if (allCities.length === 0 || allTransactions.length === 0) return;
                 const availableTrackIndex = trackStatus.findIndex(status => status === true);
                 if (availableTrackIndex === -1) return;
                 trackStatus[availableTrackIndex] = false;
                 const track = tracks[availableTrackIndex];
                 const item = document.createElement('div');
                 item.className = 'feed-item';
+
+                const transaction = getRandomItem(allTransactions);
                 const city = getRandomItem(allCities);
-                const amount = formatter.format(getRandomItem(allAmounts));
+                const amount = formatter.format(transaction.amount);
+                const product = transaction.description;
+
                 const messageTemplate = getRandomItem(messages);
-                item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', amount)}`;
+
+                item.innerHTML = `<i class="fas fa-check-circle"></i>${messageTemplate.replace('{city}', city).replace('{amount}', `<b>${amount}</b>`).replace('{product}', `<b>${product}</b>`)}`;
                 const animationDuration = 15 + Math.random() * 10;
                 item.style.animationDuration = `${animationDuration}s`;
                 track.appendChild(item);
@@ -336,17 +342,34 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }, animationDuration * 1000);
             }
 
+            function initAnimation(data) {
+                allCities = data.cities;
+                allTransactions = data.transactions;
+                setInterval(createFeedItem, 3000);
+                createFeedItem();
+                setTimeout(createFeedItem, 1500);
+            }
+
             async function startLiveFeed() {
+                const exampleData = {
+                    cities: ["Bogotá", "Medellín", "Cali", "Barranquilla"],
+                    transactions: [
+                        {amount: 75000, description: 'Audífonos'},
+                        {amount: 1500000, description: 'Portátil'},
+                        {amount: 30000, description: 'Suscripción'}
+                    ]
+                };
+                initAnimation(exampleData);
+
                 try {
                     const response = await fetch('get_realtime_data.php');
-                    const data = await response.json();
-                    if (data.cities && data.amounts) {
-                        allCities = data.cities;
-                        allAmounts = data.amounts;
-                        setInterval(createFeedItem, 3000);
+                    const realData = await response.json();
+                    if (realData.cities && realData.transactions && realData.transactions.length > 0) {
+                        allCities = realData.cities;
+                        allTransactions = realData.transactions;
                     }
                 } catch (error) {
-                    console.error("Error al cargar datos para el live feed:", error);
+                    console.error("Error al cargar datos reales para el live feed:", error);
                 }
             }
             startLiveFeed();

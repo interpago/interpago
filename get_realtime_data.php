@@ -4,24 +4,31 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/config.php';
 
 // Este script provee datos para la animación del 'live feed'.
-// Combina datos reales (montos) con datos genéricos (ciudades)
-// para dar una sensación de actividad constante de forma segura y privada.
-
+// Combina datos reales con datos genéricos para dar una sensación de actividad.
 try {
-    // 1. Obtener los montos de las últimas 5 transacciones para dar realismo a la animación
-    $stmt = $conn->prepare("SELECT amount FROM transactions WHERE status IN ('funded', 'released', 'shipped') ORDER BY id DESC LIMIT 5");
+    // 1. Obtener los detalles de las últimas 10 transacciones (monto y descripción)
+    $stmt = $conn->prepare("SELECT amount, product_description FROM transactions WHERE status IN ('funded', 'released', 'shipped') ORDER BY created_at DESC LIMIT 10");
     $stmt->execute();
     $result = $stmt->get_result();
-    $amounts = [];
+    $transactions = [];
     while($row = $result->fetch_assoc()) {
-        // Asegurarse que los montos son números para JSON
-        $amounts[] = (float)$row['amount'];
+        // Asegurarse de que los datos son del tipo correcto y limitar la longitud de la descripción
+        $transactions[] = [
+            'amount' => (float)$row['amount'],
+            'description' => mb_strimwidth($row['product_description'], 0, 30, "...")
+        ];
     }
     $stmt->close();
 
-    // Si no hay transacciones, usar montos de ejemplo
-    if (empty($amounts)) {
-        $amounts = [55000, 120000, 85000, 250000, 45000];
+    // Si no hay transacciones, usar datos de ejemplo para que la animación no se detenga
+    if (empty($transactions)) {
+        $transactions = [
+            ['amount' => 55000, 'description' => 'Servicio de diseño web'],
+            ['amount' => 120000, 'description' => 'Teléfono móvil'],
+            ['amount' => 85000, 'description' => 'Reparación de portátil'],
+            ['amount' => 250000, 'description' => 'Consola de videojuegos'],
+            ['amount' => 45000, 'description' => 'Clases de música online']
+        ];
     }
 
     // 2. Cargar la lista de ciudades desde el archivo JSON
@@ -30,17 +37,17 @@ try {
         $cities_json = file_get_contents($cities_json_path);
         $cities = json_decode($cities_json, true);
     } else {
-        $cities = ["Bogotá", "Medellín", "Cali"]; // Fallback por si el archivo no existe
+        $cities = ["Bogotá", "Medellín", "Cali"]; // Ciudades de respaldo
     }
 
-    // 3. Devolver los datos en formato JSON
+    // 3. Devolver los datos en un formato JSON claro
     echo json_encode([
-        'amounts' => $amounts,
+        'transactions' => $transactions,
         'cities' => $cities
     ]);
 
 } catch (Exception $e) {
-    // En caso de error, devolver un JSON vacío para no romper el script del cliente
+    // En caso de error, devolver un JSON de error para no romper el script del cliente
     http_response_code(500);
     echo json_encode(['error' => 'No se pudieron obtener los datos de actividad.']);
 }
