@@ -1,4 +1,6 @@
 <?php
+// ajax/chat_handler.php
+
 // Activamos el reporte de errores para no tener fallos silenciosos
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -189,3 +191,5 @@ function get_new_messages_for_admin($conn) {
     }
     echo json_encode(['success' => true, 'messages' => $messages]);
 }
+
+?>

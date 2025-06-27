@@ -28,7 +28,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
     $current_user_id = $_SESSION['user_id'];
     $current_user_name = $_SESSION['user_name'];
-    $current_user_uuid = $_SESSION['user_uuid'];
+    $current_user_uuid = $_SESSION['user_uuid'] ?? null;
 
     $role = $_POST['role'];
     $counterparty_email = trim($_POST['counterparty_email']);
@@ -49,42 +49,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             $message = "El correo de la contraparte no está registrado.";
             $message_type = 'error';
         } else {
-            $counterparty_uuid = $counterparty['user_uuid'];
-            if ($role === 'buyer') {
-                $buyer_id = $current_user_id; $seller_id = $counterparty['id'];
-                $buyer_name = $current_user_name; $seller_name = $counterparty['name'];
-                $buyer_uuid = $current_user_uuid; $seller_uuid = $counterparty_uuid;
-            } else {
-                $buyer_id = $counterparty['id']; $seller_id = $current_user_id;
-                $buyer_name = $counterparty['name']; $seller_name = $current_user_name;
-                $buyer_uuid = $counterparty_uuid; $seller_uuid = $current_user_uuid;
-            }
-
-            $transaction_uuid = generate_uuid();
-
-            $service_fee = $amount * SERVICE_FEE_PERCENTAGE;
-            $gateway_fee = ($amount * GATEWAY_PERCENTAGE_COST) + GATEWAY_FIXED_COST;
-            $commission_before_tax = $service_fee + $gateway_fee;
-            $tax_on_commission = $commission_before_tax * GATEWAY_TAX_PERCENTAGE;
-            $total_commission = $commission_before_tax + $tax_on_commission;
-
-            if ($commission_payer === 'seller') {
-                $net_amount = $amount - $total_commission;
-            } elseif ($commission_payer === 'split') {
-                $net_amount = $amount - ($total_commission / 2);
-            } else {
-                $net_amount = $amount;
-            }
-
-            $stmt = $conn->prepare("INSERT INTO transactions (transaction_uuid, seller_name, buyer_name, product_description, amount, commission, net_amount, commission_payer, buyer_id, seller_id, buyer_uuid, seller_uuid, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initiated')");
-            $stmt->bind_param("ssssdddsiiss", $transaction_uuid, $seller_name, $buyer_name, $product_description, $amount, $total_commission, $net_amount, $commission_payer, $buyer_id, $seller_id, $buyer_uuid, $seller_uuid);
-
-            if ($stmt->execute()) {
-                header("Location: transaction.php?tx_uuid={$transaction_uuid}");
-                exit;
-            } else {
-                $message = "Error al crear la transacción: " . $stmt->error;
+            $counterparty_uuid = $counterparty['user_uuid'] ?? null;
+            if (empty($current_user_uuid) || empty($counterparty_uuid)) {
+                $message = "Error crítico: Uno de los usuarios en la transacción no tiene un identificador válido. Por favor, contacta a soporte.";
                 $message_type = 'error';
+            } else {
+                if ($role === 'buyer') {
+                    $buyer_id = $current_user_id; $seller_id = $counterparty['id'];
+                    $buyer_name = $current_user_name; $seller_name = $counterparty['name'];
+                    $buyer_uuid = $current_user_uuid; $seller_uuid = $counterparty_uuid;
+                } else {
+                    $buyer_id = $counterparty['id']; $seller_id = $current_user_id;
+                    $buyer_name = $counterparty['name']; $seller_name = $current_user_name;
+                    $buyer_uuid = $counterparty_uuid; $seller_uuid = $current_user_uuid;
+                }
+
+                $transaction_uuid = generate_uuid();
+
+                $service_fee = $amount * (defined('SERVICE_FEE_PERCENTAGE') ? SERVICE_FEE_PERCENTAGE : 0);
+                $gateway_fee = ($amount * (defined('GATEWAY_PERCENTAGE_COST') ? GATEWAY_PERCENTAGE_COST : 0)) + (defined('GATEWAY_FIXED_COST') ? GATEWAY_FIXED_COST : 0);
+                $commission_before_tax = $service_fee + $gateway_fee;
+                $tax_on_commission = $commission_before_tax * (defined('GATEWAY_TAX_PERCENTAGE') ? GATEWAY_TAX_PERCENTAGE : 0);
+                $total_commission = $commission_before_tax + $tax_on_commission;
+
+                if ($commission_payer === 'seller') {
+                    $net_amount = $amount - $total_commission;
+                } elseif ($commission_payer === 'split') {
+                    $net_amount = $amount - ($total_commission / 2);
+                } else {
+                    $net_amount = $amount;
+                }
+
+                $stmt = $conn->prepare("INSERT INTO transactions (transaction_uuid, seller_name, buyer_name, product_description, amount, commission, net_amount, commission_payer, buyer_id, seller_id, buyer_uuid, seller_uuid, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initiated')");
+                $stmt->bind_param("ssssdddsiiss", $transaction_uuid, $seller_name, $buyer_name, $product_description, $amount, $total_commission, $net_amount, $commission_payer, $buyer_id, $seller_id, $buyer_uuid, $seller_uuid);
+
+                if ($stmt->execute()) {
+                    header("Location: transaction.php?tx_uuid={$transaction_uuid}");
+                    exit;
+                } else {
+                    $message = "Error al crear la transacción: " . $stmt->error;
+                    $message_type = 'error';
+                }
             }
         }
     }
@@ -95,7 +100,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interpago - Transacciones Seguras en Colombia</title>
+    <title>TuPacto - Transacciones Seguras en Colombia</title>
     <link rel="icon" href="data:image/svg+xml,%3csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg' fill='currentColor'%3e%3cpath d='M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z'/%3e%3cpath d='M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z'/%3e%3c/svg%3e">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -132,7 +137,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         <div class="w-full md:w-1/2 bg-white p-8 md:p-12 flex flex-col">
             <nav class="w-full">
                 <div class="flex justify-between items-center">
-                    <div class="text-2xl font-bold text-slate-900"><a href="index.php" class="flex items-center space-x-3"><svg class="h-8 w-8 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg><span>Interpago</span></a></div>
+                    <div class="text-2xl font-bold text-slate-900"><a href="index.php" class="flex items-center space-x-3"><svg class="h-8 w-8 text-slate-800" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M 45,10 C 25,10 10,25 10,45 L 10,55 C 10,75 25,90 45,90 L 55,90 C 60,90 60,85 55,80 L 45,80 C 30,80 20,70 20,55 L 20,45 C 20,30 30,20 45,20 L 55,20 C 60,20 60,15 55,10 Z"/><path d="M 55,90 C 75,90 90,75 90,55 L 90,45 C 90,25 75,10 55,10 L 45,10 C 40,10 40,15 45,20 L 55,20 C 70,20 80,30 80,45 L 80,55 C 80,70 70,80 55,80 L 45,80 C 40,80 40,85 45,90 Z"/></svg><span>TuPacto</span></a></div>
                     <div class="hidden md:flex items-center space-x-4">
                         <?php if (isset($_SESSION['user_id'])): ?>
                             <a href="dashboard.php" class="text-slate-600 font-medium hover:text-blue-600">Mi Panel</a>
@@ -208,7 +213,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
 
     <?php if (isset($_SESSION['user_id'])): ?>
         <div id="chat-bubble"><i class="fa-solid fa-comments"></i></div>
-        <div id="chat-window"><div class="chat-header"><span>Soporte en Línea</span><span id="close-chat">&times;</span></div><div class="chat-messages"></div><div class="chat-input"><input type="text" id="chat-message-input" placeholder="Escribe tu mensaje..."><button id="send-chat-message"><i class="fa-solid fa-paper-plane"></i></button></div></div>
+        <div id="chat-window">
+            <div class="chat-header">
+                <span>Soporte en Línea</span>
+                <span id="close-chat" class="cursor-pointer">&times;</span>
+            </div>
+            <div class="chat-messages"></div>
+            <div class="chat-input">
+                <input type="text" id="chat-message-input" placeholder="Escribe tu mensaje...">
+                <button id="send-chat-message"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+        </div>
     <?php endif; ?>
 
     <script>
@@ -235,10 +250,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }
 
                 const payer = document.querySelector('input[name="commission_payer"]:checked').value;
-                const serviceFee = amount * <?php echo SERVICE_FEE_PERCENTAGE; ?>;
-                const gatewayFee = (amount * <?php echo GATEWAY_PERCENTAGE_COST; ?>) + <?php echo GATEWAY_FIXED_COST; ?>;
+                const serviceFee = amount * <?php echo defined('SERVICE_FEE_PERCENTAGE') ? SERVICE_FEE_PERCENTAGE : 0; ?>;
+                const gatewayFee = (amount * <?php echo defined('GATEWAY_PERCENTAGE_COST') ? GATEWAY_PERCENTAGE_COST : 0; ?>) + <?php echo defined('GATEWAY_FIXED_COST') ? GATEWAY_FIXED_COST : 0; ?>;
                 const commissionBeforeTax = serviceFee + gatewayFee;
-                const taxOnCommission = commissionBeforeTax * <?php echo GATEWAY_TAX_PERCENTAGE; ?>;
+                const taxOnCommission = commissionBeforeTax * <?php echo defined('GATEWAY_TAX_PERCENTAGE') ? GATEWAY_TAX_PERCENTAGE : 0; ?>;
                 const totalCommission = commissionBeforeTax + taxOnCommission;
 
                 let sellerReceives = amount;
@@ -254,7 +269,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                 }
 
                 commissionBreakdown.innerHTML = `
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Comisión Interpago:</span><span class="font-semibold">${formatter.format(serviceFee)}</span></div>
+                    <div class="flex justify-between text-xs"><span class="text-slate-600">Comisión TuPacto:</span><span class="font-semibold">${formatter.format(serviceFee)}</span></div>
                     <div class="flex justify-between text-xs"><span class="text-slate-600">Costo Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayFee)}</span></div>
                     <div class="flex justify-between text-xs"><span class="text-slate-600">IVA (19%) sobre comisión:</span><span class="font-semibold">${formatter.format(taxOnCommission)}</span></div>
                     <hr class="my-1 border-slate-200">
@@ -270,191 +285,106 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
             calculateAndShowFees();
         }
 
-        const tracks = [document.getElementById('track-1'), document.getElementById('track-2')];
-        if(tracks[0] && tracks[1]) {
-            let allCities = [];
-            let allTransactions = [];
-            let trackStatus = [true, true];
-
-            const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
-
-            const messages = [
-                "Acuerdo por {product} ({amount}) completado en {city}",
-                "Pago de {amount} por {product} fue liberado en {city}",
-                "Nueva transacción por {product} ({amount}) desde {city}"
-            ];
-
-            const getRandomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-            function createFeedItem() {
-                if (allCities.length === 0 || allTransactions.length === 0) return;
-                const availableTrackIndex = trackStatus.findIndex(status => status === true);
-                if (availableTrackIndex === -1) return;
-                trackStatus[availableTrackIndex] = false;
-                const track = tracks[availableTrackIndex];
-                const item = document.createElement('div');
-                item.className = 'feed-item';
-
-                const transaction = getRandomItem(allTransactions);
-                const city = `<b>${getRandomItem(allCities)}</b>`;
-                const amount = `<b>${formatter.format(transaction.amount)}</b>`;
-                const product = `<b>${transaction.description}</b>`;
-
-                let messageTemplate = getRandomItem(messages);
-
-                let finalMessage = messageTemplate
-                    .replace('{product}', product)
-                    .replace('{amount}', amount)
-                    .replace('{city}', city);
-
-                item.innerHTML = `<i class="fas fa-check-circle"></i>&nbsp;${finalMessage}`;
-
-                const animationDuration = 20 + Math.random() * 10;
-                item.style.animationDuration = `${animationDuration}s`;
-                track.appendChild(item);
-                setTimeout(() => {
-                    item.remove();
-                    trackStatus[availableTrackIndex] = true;
-                }, animationDuration * 1000);
-            }
-
-            function initAnimation(data) {
-                allCities = data.cities;
-                allTransactions = data.transactions;
-                setInterval(createFeedItem, 3000);
-                createFeedItem();
-                setTimeout(createFeedItem, 1500);
-            }
-
-            async function startLiveFeed() {
-                const exampleData = {
-                    cities: ["Bogotá", "Medellín", "Cali", "Barranquilla"],
-                    transactions: [
-                        {amount: 75000, description: 'Audífonos'},
-                        {amount: 1500000, description: 'Portátil'},
-                        {amount: 30000, description: 'Suscripción'}
-                    ]
-                };
-                initAnimation(exampleData);
-
-                try {
-                    const response = await fetch('get_realtime_data.php');
-                    const realData = await response.json();
-                    if (realData.cities && realData.transactions && realData.transactions.length > 0) {
-                        allCities = realData.cities;
-                        allTransactions = realData.transactions;
-                    }
-                } catch (error) {
-                    console.error("Error al cargar datos reales para el live feed:", error);
-                }
-            }
-            startLiveFeed();
-        }
-
         const chatBubble = document.getElementById('chat-bubble');
-        if (chatBubble) {
-           const chatWindow = document.getElementById('chat-window');
-            const closeChat = document.getElementById('close-chat');
-            const chatMessages = document.querySelector('.chat-messages');
-            const chatInput = document.getElementById('chat-message-input');
-            const sendButton = document.getElementById('send-chat-message');
+        const chatWindow = document.getElementById('chat-window');
+        const closeChat = document.getElementById('close-chat');
+        const chatMessages = document.querySelector('.chat-messages');
+        const chatInput = document.getElementById('chat-message-input');
+        const sendButton = document.getElementById('send-chat-message');
 
+        if (chatBubble) {
             let conversationId = null;
             let chatPollInterval = null;
 
-            function appendMessage(senderType, text) {
-                const messageElem = document.createElement('div');
-                messageElem.classList.add('message', senderType === 'user' ? 'user' : 'admin');
-                messageElem.textContent = text;
-                chatMessages.appendChild(messageElem);
+            const appendMessage = (sender, text) => {
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message', sender);
+                messageDiv.textContent = text;
+                chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
+            };
 
-            async function initChat() {
+            const fetchAndRenderHistory = async (convId) => {
+                try {
+                    const response = await fetch(`ajax/chat_handler.php?action=getHistory&conversation_id=${convId}`);
+                    const data = await response.json();
+                    if(data.success) {
+                        chatMessages.innerHTML = '';
+                        data.messages.forEach(msg => {
+                            appendMessage(msg.sender_type, msg.message);
+                        });
+                    }
+                } catch(e){ console.error(e); }
+            };
+
+            const initChat = async () => {
                 try {
                     const response = await fetch('ajax/chat_handler.php?action=getHistory');
                     const data = await response.json();
+                    if (data.success) {
+                        conversationId = data.conversation_id;
+                        await fetchAndRenderHistory(conversationId);
+                        if (chatPollInterval) clearInterval(chatPollInterval);
+                        chatPollInterval = setInterval(() => fetchNewMessages(conversationId), 5000);
+                    } else {
+                        appendMessage('admin', 'Error al iniciar el chat.');
+                    }
+                } catch (err) { console.error('Error al inicializar el chat:', err); }
+            };
 
-                    if (data.error || !data.success) throw new Error(data.error || 'Respuesta inválida del servidor');
-
-                    conversationId = data.conversation_id;
-                    chatMessages.innerHTML = '';
-
-                    data.messages.forEach(msg => {
-                        appendMessage(msg.sender_type, msg.message);
-                    });
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
-
-                    if (chatPollInterval) clearInterval(chatPollInterval);
-                    chatPollInterval = setInterval(getUpdates, 3500);
-
-                } catch (err) {
-                    console.error('Error al iniciar el chat:', err);
-                    appendMessage('admin', 'No se pudo conectar al chat. Por favor, recarga la página.');
-                }
-            }
-
-            async function sendMessage() {
-                const messageText = chatInput.value.trim();
-                if (messageText === '' || !conversationId) return;
-
-                const tempMessageText = messageText;
-                appendMessage('user', tempMessageText);
-                chatInput.value = '';
-
-                const formData = new FormData();
-                formData.append('action', 'sendMessage');
-                formData.append('conversation_id', conversationId);
-                formData.append('message', tempMessageText);
-
+            const fetchNewMessages = async (convId) => {
+                if (!convId) return;
                 try {
-                    const response = await fetch('ajax/chat_handler.php', { method: 'POST', body: formData });
+                    const response = await fetch(`ajax/chat_handler.php?action=getNewMessages&conversation_id=${convId}`);
                     const data = await response.json();
-                    if (!data.success) throw new Error(data.error || 'Fallo al enviar el mensaje');
-                } catch (err) {
-                    console.error('Error al enviar mensaje:', err);
-                    appendMessage('admin', 'Error: Tu mensaje no pudo ser enviado.');
-                }
-            }
-
-            async function getUpdates() {
-                if (!conversationId) return;
-                try {
-                    const formData = new FormData();
-                    formData.append('action', 'getNewMessages');
-                    formData.append('conversation_id', conversationId);
-
-                    const response = await fetch('ajax/chat_handler.php', {method: 'POST', body: formData});
-                    const data = await response.json();
-
-                    if (data.error || !data.success) throw new Error(data.error || 'Respuesta inválida del servidor');
-
-                    if (data.messages && data.messages.length > 0) {
+                    if (data.success && data.messages.length > 0) {
                         data.messages.forEach(msg => {
-                            if (msg.sender_type === 'admin') {
-                                appendMessage(msg.sender_type, msg.message);
-                            }
+                            appendMessage(msg.sender_type, msg.message);
                         });
                     }
-                } catch (err) {
-                    console.error('Error al obtener actualizaciones del chat:', err);
-                }
-            }
+                } catch (err) { console.error('Error al obtener nuevos mensajes:', err); }
+            };
+
+            const sendMessage = async () => {
+                const messageText = chatInput.value.trim();
+                if (!messageText || !conversationId) return;
+
+                appendMessage('user', messageText);
+                chatInput.value = '';
+
+                try {
+                    const formData = new FormData();
+                    formData.append('action', 'sendMessage');
+                    formData.append('conversation_id', conversationId);
+                    formData.append('message', messageText);
+
+                    const response = await fetch('ajax/chat_handler.php', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    if (!data.success) {
+                        appendMessage('admin', 'Error al enviar el mensaje.');
+                    }
+                } catch (err) { console.error('Error al enviar mensaje:', err); }
+            };
 
             chatBubble.addEventListener('click', () => {
                 chatWindow.classList.toggle('open');
                 if (chatWindow.classList.contains('open') && !conversationId) {
                     initChat();
-                } else if (!chatWindow.classList.contains('open')) {
-                    if (chatPollInterval) clearInterval(chatPollInterval);
-                    chatPollInterval = null;
+                } else if (!chatWindow.classList.contains('open') && chatPollInterval) {
+                     clearInterval(chatPollInterval);
+                     chatPollInterval = null;
                 }
             });
 
             closeChat.addEventListener('click', () => {
                 chatWindow.classList.remove('open');
-                if (chatPollInterval) clearInterval(chatPollInterval);
-                chatPollInterval = null;
+                if (chatPollInterval) {
+                    clearInterval(chatPollInterval);
+                    chatPollInterval = null;
+                }
             });
 
             sendButton.addEventListener('click', sendMessage);

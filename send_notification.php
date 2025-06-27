@@ -5,15 +5,16 @@ use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
 // Cargar dependencias de PHPMailer y la configuración principal
+// ----- INICIO DE LA CORRECCIÓN -----
+// Se elimina '../' para que busque los archivos en el directorio actual (la raíz del proyecto).
 require_once __DIR__ . '/vendor/autoload.php';
-// ***** INICIO DE LA CORRECCIÓN *****
-// Se añade la inclusión del archivo de configuración para que las constantes SMTP existan.
 require_once __DIR__ . '/config.php';
-// ***** FIN DE LA CORRECCIÓN *****
+// ----- FIN DE LA CORRECCIÓN -----
+
 
 // La función ahora está preparada para recibir diferentes tipos de notificaciones
 function send_notification($conn, $type, $data) {
-    // No hacer nada si falta la configuración SMTP. Esta comprobación ahora funcionará correctamente.
+    // No hacer nada si falta la configuración SMTP.
     if (!defined('SMTP_HOST') || empty(SMTP_HOST) || !defined('SMTP_USERNAME') || empty(SMTP_USERNAME)) {
         error_log("Configuración SMTP incompleta o no definida. No se enviará el correo.");
         return; // Salir silenciosamente si el SMTP no está configurado
@@ -57,10 +58,15 @@ function send_notification($conn, $type, $data) {
                 $counterparty_name = $data['counterparty_name'];
                 $counterparty_link = $data['counterparty_link'];
 
-                $subject = "Has sido invitado a una transacción en Interpago";
+                $subject = "Has sido invitado a una transacción en TuPacto";
                 $body    = "Hola " . htmlspecialchars($counterparty_name) . ",<br><br><strong>" . htmlspecialchars($initiator_name) . "</strong> te ha invitado a una transacción segura para el producto: <strong>'" . htmlspecialchars($transaction['product_description']) . "'</strong>.<br><br>Puedes ver los detalles y continuar con el proceso en el siguiente enlace:<br><a href='" . $counterparty_link . "'>" . $counterparty_link . "</a>";
 
                 $mail->addAddress($counterparty_email, $counterparty_name);
+                break;
+
+            case 'new_message':
+                // Lógica para notificar un nuevo mensaje
+                // ...
                 break;
 
             case 'payment_approved':
