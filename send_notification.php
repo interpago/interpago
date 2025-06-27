@@ -4,12 +4,18 @@
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
+// Cargar dependencias de PHPMailer y la configuración principal
 require_once __DIR__ . '/vendor/autoload.php';
+// ***** INICIO DE LA CORRECCIÓN *****
+// Se añade la inclusión del archivo de configuración para que las constantes SMTP existan.
+require_once __DIR__ . '/config.php';
+// ***** FIN DE LA CORRECCIÓN *****
 
 // La función ahora está preparada para recibir diferentes tipos de notificaciones
 function send_notification($conn, $type, $data) {
-    // No hacer nada si falta la configuración SMTP
-    if (empty(SMTP_HOST) || empty(SMTP_USERNAME)) {
+    // No hacer nada si falta la configuración SMTP. Esta comprobación ahora funcionará correctamente.
+    if (!defined('SMTP_HOST') || empty(SMTP_HOST) || !defined('SMTP_USERNAME') || empty(SMTP_USERNAME)) {
+        error_log("Configuración SMTP incompleta o no definida. No se enviará el correo.");
         return; // Salir silenciosamente si el SMTP no está configurado
     }
 
@@ -22,8 +28,8 @@ function send_notification($conn, $type, $data) {
         $mail->SMTPAuth   = true;
         $mail->Username   = SMTP_USERNAME;
         $mail->Password   = SMTP_PASSWORD;
-        $mail->SMTPSecure = SMTP_SECURE;
-        $mail->Port       = SMTP_PORT;
+        $mail->SMTPSecure = defined('SMTP_SECURE') ? SMTP_SECURE : PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = defined('SMTP_PORT') ? SMTP_PORT : 587;
         $mail->CharSet    = 'UTF-8';
 
         // Remitente
@@ -45,7 +51,6 @@ function send_notification($conn, $type, $data) {
         $base_url = rtrim(APP_URL, '/');
 
         switch ($type) {
-            // CORRECCIÓN: Este caso ahora maneja la invitación inicial de forma personalizada.
             case 'new_transaction_invitation':
                 $initiator_name = $data['initiator_name'];
                 $counterparty_email = $data['counterparty_email'];
@@ -85,7 +90,7 @@ function send_notification($conn, $type, $data) {
 
     } catch (Exception $e) {
         // En un entorno de producción, es mejor registrar el error en un archivo.
-        // error_log("El mensaje no pudo ser enviado. Mailer Error: {$mail->ErrorInfo}");
+        error_log("El mensaje no pudo ser enviado. Mailer Error: {$mail->ErrorInfo}");
     }
 }
 ?>
