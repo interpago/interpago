@@ -36,10 +36,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
     $amount = filter_var($_POST['amount'], FILTER_VALIDATE_FLOAT);
     $commission_payer = $_POST['commission_payer'] ?? 'seller';
 
-    if (empty($role) || empty($counterparty_email) || empty($product_description) || empty($amount) || $amount <= 0) {
+    // Definimos el monto mínimo permitido desde la configuración
+    $min_amount = defined('MINIMUM_TRANSACTION_AMOUNT') ? MINIMUM_TRANSACTION_AMOUNT : 0;
+
+    // --- VALIDACIÓN CORREGIDA ---
+    if (empty($role) || empty($counterparty_email) || empty($product_description) || empty($amount)) {
         $message = "Por favor, completa todos los campos correctamente.";
         $message_type = 'error';
+    } elseif ($amount < $min_amount) {
+        // Añadimos la validación del monto mínimo
+        $message = "El monto de la transacción debe ser de al menos " . number_format($min_amount, 0, ',', '.') . " COP.";
+        $message_type = 'error';
     } else {
+        // Si la validación es exitosa, continuamos con la lógica
         $user_stmt = $conn->prepare("SELECT id, name, user_uuid FROM users WHERE email = ?");
         $user_stmt->bind_param("s", $counterparty_email);
         $user_stmt->execute();
@@ -76,7 +85,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                     $net_amount = $amount - $total_commission;
                 } elseif ($commission_payer === 'split') {
                     $net_amount = $amount - ($total_commission / 2);
-                } else {
+                } else { // 'buyer'
                     $net_amount = $amount;
                 }
 
@@ -133,6 +142,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
     </style>
 </head>
 <body class="bg-slate-50">
+    <!-- El resto del HTML del body no necesita cambios -->
     <div class="flex flex-col md:flex-row min-h-screen">
         <div class="w-full md:w-1/2 bg-white p-8 md:p-12 flex flex-col">
             <nav class="w-full">
@@ -190,7 +200,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Tu Rol</label><select name="role" class="w-full p-3 border border-slate-300 rounded-lg" required><option value="buyer">Soy el Comprador</option><option value="seller">Soy el Vendedor</option></select></div>
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Correo de la Contraparte</label><input name="counterparty_email" type="email" placeholder="email@ejemplo.com" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
                             <div><label class="block text-sm font-medium text-slate-700 mb-1">Descripción del Producto</label><textarea name="product_description" placeholder="Ej: iPhone 14 Pro, 256GB" class="w-full p-3 border border-slate-300 rounded-lg" required></textarea></div>
-                            <div><label class="block text-sm font-medium text-slate-700 mb-1">Monto del Acuerdo (COP)</label><input id="amount" name="amount" type="number" step="0.01" placeholder="Ej: 350000" class="w-full p-3 border border-slate-300 rounded-lg" required></div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Monto del Acuerdo (COP)</label>
+                                <!-- CAMPO DE MONTO CORREGIDO -->
+                                <input
+                                    id="amount"
+                                    name="amount"
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="Monto mínimo <?php echo number_format(MINIMUM_TRANSACTION_AMOUNT, 0, ',', '.'); ?>"
+                                    class="w-full p-3 border border-slate-300 rounded-lg"
+                                    required
+                                    min="<?php echo MINIMUM_TRANSACTION_AMOUNT; ?>"
+                                >
+                            </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-2">¿Quién asume la comisión?</label>
                                 <div class="grid grid-cols-3 gap-2 rounded-lg bg-slate-200 p-1">
@@ -200,7 +223,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
                                 </div>
                             </div>
                             <div id="commission-breakdown" class="p-4 bg-slate-100 rounded-lg space-y-2 text-sm hidden"></div>
-                            <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
+                            <button id="submit-button" type="submit" class="w-full bg-slate-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-slate-900 transition-colors" <?php echo !isset($_SESSION['user_id']) ? 'disabled' : ''; ?>><i class="fas fa-lock mr-2"></i>Iniciar Acuerdo Seguro</button>
                         </div>
                     </form>
                 </div>
@@ -236,55 +259,88 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_transaction']))
         if (mobileMenu) { mobileMenu.addEventListener('click', (e) => { if (e.target === mobileMenu) mobileMenu.classList.add('hidden'); }); }
 
         const amountInput = document.getElementById('amount');
-        if (amountInput) {
+        const commissionPayers = document.querySelectorAll('input[name="commission_payer"]');
+        const isUserLoggedIn = <?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>;
+
+        function calculateAndShowFees() {
             const commissionBreakdown = document.getElementById('commission-breakdown');
-            const commissionPayers = document.querySelectorAll('input[name="commission_payer"]');
+            const submitButton = document.getElementById('submit-button');
+            const amount = parseFloat(amountInput.value);
+            const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
 
-            function calculateAndShowFees() {
-                const amount = parseFloat(amountInput.value);
-                const formatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 });
+            // --- VALIDACIÓN DE JAVASCRIPT CORREGIDA ---
+            const minAmount = <?php echo defined('MINIMUM_TRANSACTION_AMOUNT') ? MINIMUM_TRANSACTION_AMOUNT : 0; ?>;
 
-                if (isNaN(amount) || amount <= 0) {
-                    commissionBreakdown.classList.add('hidden');
-                    return;
+            // Oculta el desglose si no hay un monto válido
+            if (isNaN(amount) || amount <= 0) {
+                commissionBreakdown.classList.add('hidden');
+                // Si el usuario ha iniciado sesión, deshabilita el botón de envío
+                if (isUserLoggedIn) {
+                   submitButton.disabled = true;
                 }
+                return;
+            }
 
-                const payer = document.querySelector('input[name="commission_payer"]:checked').value;
-                const serviceFee = amount * <?php echo defined('SERVICE_FEE_PERCENTAGE') ? SERVICE_FEE_PERCENTAGE : 0; ?>;
-                const gatewayFee = (amount * <?php echo defined('GATEWAY_PERCENTAGE_COST') ? GATEWAY_PERCENTAGE_COST : 0; ?>) + <?php echo defined('GATEWAY_FIXED_COST') ? GATEWAY_FIXED_COST : 0; ?>;
-                const commissionBeforeTax = serviceFee + gatewayFee;
-                const taxOnCommission = commissionBeforeTax * <?php echo defined('GATEWAY_TAX_PERCENTAGE') ? GATEWAY_TAX_PERCENTAGE : 0; ?>;
-                const totalCommission = commissionBeforeTax + taxOnCommission;
-
-                let sellerReceives = amount;
-                let buyerPays = amount;
-                if (payer === 'seller') {
-                    sellerReceives = amount - totalCommission;
-                } else if (payer === 'buyer') {
-                    buyerPays = amount + totalCommission;
-                } else if (payer === 'split') {
-                    const splitCommission = totalCommission / 2;
-                    sellerReceives = amount - splitCommission;
-                    buyerPays = amount + splitCommission;
-                }
-
+            // Valida el monto mínimo en tiempo real
+            if (amount < minAmount) {
                 commissionBreakdown.innerHTML = `
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Comisión TuPacto:</span><span class="font-semibold">${formatter.format(serviceFee)}</span></div>
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">Costo Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayFee)}</span></div>
-                    <div class="flex justify-between text-xs"><span class="text-slate-600">IVA (19%) sobre comisión:</span><span class="font-semibold">${formatter.format(taxOnCommission)}</span></div>
-                    <hr class="my-1 border-slate-200">
-                    <div class="flex justify-between font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
-                    <hr class="my-1 border-dashed border-slate-300">
-                    <div class="flex justify-between font-bold"><span class="text-green-600">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
-                    <div class="flex justify-between font-bold"><span class="text-red-600">Comprador Paga:</span><span class="text-red-600">${formatter.format(buyerPays)}</span></div>
+                    <div class="text-center text-red-700 font-semibold p-2">
+                        El monto mínimo para la transacción es ${formatter.format(minAmount)}.
+                    </div>
                 `;
                 commissionBreakdown.classList.remove('hidden');
+                if (isUserLoggedIn) {
+                   submitButton.disabled = true;
+                }
+                return;
             }
+
+            // Si el monto es correcto y el usuario inició sesión, habilita el botón
+            if (isUserLoggedIn) {
+                submitButton.disabled = false;
+            }
+            // --- FIN DE LA CORRECCIÓN DE JAVASCRIPT ---
+
+            const payer = document.querySelector('input[name="commission_payer"]:checked').value;
+            const serviceFee = amount * <?php echo defined('SERVICE_FEE_PERCENTAGE') ? SERVICE_FEE_PERCENTAGE : 0; ?>;
+            const gatewayFee = (amount * <?php echo defined('GATEWAY_PERCENTAGE_COST') ? GATEWAY_PERCENTAGE_COST : 0; ?>) + <?php echo defined('GATEWAY_FIXED_COST') ? GATEWAY_FIXED_COST : 0; ?>;
+            const commissionBeforeTax = serviceFee + gatewayFee;
+            const taxOnCommission = commissionBeforeTax * <?php echo defined('GATEWAY_TAX_PERCENTAGE') ? GATEWAY_TAX_PERCENTAGE : 0; ?>;
+            const totalCommission = commissionBeforeTax + taxOnCommission;
+
+            let sellerReceives = amount;
+            let buyerPays = amount;
+            if (payer === 'seller') {
+                sellerReceives = amount - totalCommission;
+            } else if (payer === 'buyer') {
+                buyerPays = amount + totalCommission;
+            } else if (payer === 'split') {
+                const splitCommission = totalCommission / 2;
+                sellerReceives = amount - splitCommission;
+                buyerPays = amount + splitCommission;
+            }
+
+            commissionBreakdown.innerHTML = `
+                <div class="flex justify-between text-xs"><span class="text-slate-600">Comisión TuPacto:</span><span class="font-semibold">${formatter.format(serviceFee)}</span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-600">Costo Pasarela (Aprox.):</span><span class="font-semibold">${formatter.format(gatewayFee)}</span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-600">IVA (19%) sobre comisión:</span><span class="font-semibold">${formatter.format(taxOnCommission)}</span></div>
+                <hr class="my-1 border-slate-200">
+                <div class="flex justify-between font-bold"><span class="text-slate-800">Comisión Total:</span><span class="text-slate-800">${formatter.format(totalCommission)}</span></div>
+                <hr class="my-1 border-dashed border-slate-300">
+                <div class="flex justify-between font-bold"><span class="text-green-600">Vendedor Recibe:</span><span class="text-green-600">${formatter.format(sellerReceives)}</span></div>
+                <div class="flex justify-between font-bold"><span class="text-red-600">Comprador Paga:</span><span class="text-red-600">${formatter.format(buyerPays)}</span></div>
+            `;
+            commissionBreakdown.classList.remove('hidden');
+        }
+
+        if (amountInput) {
             amountInput.addEventListener('input', calculateAndShowFees);
             commissionPayers.forEach(radio => radio.addEventListener('change', calculateAndShowFees));
+            // Llama a la función al cargar la página para establecer el estado inicial del botón
             calculateAndShowFees();
         }
 
+        // El resto del script de chat no necesita cambios
         const chatBubble = document.getElementById('chat-bubble');
         const chatWindow = document.getElementById('chat-window');
         const closeChat = document.getElementById('close-chat');
